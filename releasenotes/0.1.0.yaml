@@ -1,0 +1,18 @@
+version: 0.1.0
+date: 2026-05-24
+highlights:
+  - Initial release of the VS Code Debug MCP extension.
+  - Exposes debugging, launch configurations, tasks, terminals, and the debug console to MCP clients (Claude Code, Cursor, Copilot agent mode, etc.).
+added:
+  - Streamable HTTP MCP server bound to 127.0.0.1:6736 by default.
+  - Launch tools — list_launch_configurations, start_debugging, stop_debugging, continue/pause/step_over/in/out.
+  - Debug state tools — get_threads, get_stack_trace, get_scopes, get_variables, evaluate_expression.
+  - Breakpoint tools — set/remove/toggle/clear, get_all_breakpoints, get_breakpoint.
+  - Task tools — list_tasks, run_task, list_running_tasks, stop_task.
+  - Terminal capture via shell-integration with read_terminal, list_terminals, clear_terminal_buffer, run_in_terminal.
+  - Debug console capture via DebugAdapterTracker with read_debug_console, clear_debug_console_buffer, eval_in_debug_console.
+  - Status bar item showing server state, with click-to-copy URL.
+  - Sample workspace under sample-workspace/ for end-to-end testing.
+changed: []
+fixed: []
+removed: []
