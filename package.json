@@ -4,6 +4,15 @@
   "description": "MCP server exposing VS Code debugging, terminals, debug console, launch configurations, and tasks to AI assistants.",
   "version": "0.1.0",
   "publisher": "cgaspard",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cgaspard/vscode-debug-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cgaspard/vscode-debug-mcp/issues"
+  },
+  "homepage": "https://github.com/cgaspard/vscode-debug-mcp#readme",
   "engines": {
     "vscode": "^1.90.0"
   },
