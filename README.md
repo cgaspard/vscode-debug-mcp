@@ -106,7 +106,7 @@ There is **one MCP server per machine**, not per VS Code window. The first windo
   │  ───────────────────────────────────────                             │
   │  • Owns HTTP server on port 6736                                     │
   │  • Owns IPC socket at $TMPDIR/vscode-debug-mcp-<pid>.sock            │
-  │  • Owns workspace 'monorepo' (id = sha256(path)[:12])                │
+  │  • Owns workspace A (id = sha256(path)[:12])                         │
   │  • Routes inbound tool calls to the correct workspace                │
   │  • Exposes GET /cluster so other windows can discover it             │
   └─────────┬──────────────────────────────────────────────┬─────────────┘
@@ -115,7 +115,7 @@ There is **one MCP server per machine**, not per VS Code window. The first windo
     ┌───────▼─────────────────────┐         ┌──────────────▼──────────────┐
     │  VS Code Window B           │         │  VS Code Window C           │
     │   ← FOLLOWER                │         │   ← FOLLOWER                │
-    │  • Workspace 'deviceagent'  │         │  • Workspace 'mlservice'    │
+    │  • Workspace B              │         │  • Workspace C              │
     │  • Tool calls forwarded     │         │  • Tool calls forwarded     │
     │    from leader              │         │    from leader              │
     └─────────────────────────────┘         └─────────────────────────────┘
