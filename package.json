@@ -53,6 +53,324 @@
       {
         "command": "vscodeDebugMcp.showMenu",
         "title": "Debug MCP: Show Menu"
+      },
+      {
+        "command": "vscodeDebugMcp.checkForUpdates",
+        "title": "Debug MCP: Check for Updates"
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "debugMcp_list_launch_configurations",
+        "displayName": "List launch configurations",
+        "modelDescription": "List the debug configurations defined in launch.json across the open workspace folders. Use this BEFORE asking the user how to run something — they likely already configured it.",
+        "userDescription": "Read launch.json configurations",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "debugConfigs",
+        "tags": ["debug-mcp"],
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "debugMcp_start_debugging",
+        "displayName": "Start debugging",
+        "modelDescription": "Start a VS Code debug session by launch.json configuration name. Prefer this over running the program via the terminal — the user gets a real interactive debug session with breakpoints, variable inspection, and the debug console.",
+        "userDescription": "Start a debug session",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "description": "Configuration name from launch.json. Omit to use the default." },
+            "workspaceFolder": { "type": "string", "description": "Workspace folder name (optional)." }
+          }
+        }
+      },
+      {
+        "name": "debugMcp_stop_debugging",
+        "displayName": "Stop debugging",
+        "modelDescription": "Stop the active VS Code debug session.",
+        "userDescription": "Stop the active debug session",
+        "tags": ["debug-mcp"],
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "debugMcp_continue_execution",
+        "displayName": "Continue execution",
+        "modelDescription": "Continue execution in the active debug session.",
+        "userDescription": "Resume execution",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "properties": { "threadId": { "type": "number" } }
+        }
+      },
+      {
+        "name": "debugMcp_step_over",
+        "displayName": "Step over",
+        "modelDescription": "Step over the current statement in the active debug session.",
+        "userDescription": "Step over",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "properties": { "threadId": { "type": "number" } }
+        }
+      },
+      {
+        "name": "debugMcp_step_in",
+        "displayName": "Step in",
+        "modelDescription": "Step into the next function call in the active debug session.",
+        "userDescription": "Step into",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "properties": { "threadId": { "type": "number" } }
+        }
+      },
+      {
+        "name": "debugMcp_step_out",
+        "displayName": "Step out",
+        "modelDescription": "Step out of the current function in the active debug session.",
+        "userDescription": "Step out",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "properties": { "threadId": { "type": "number" } }
+        }
+      },
+      {
+        "name": "debugMcp_get_threads",
+        "displayName": "Get threads",
+        "modelDescription": "List threads in the active debug session.",
+        "userDescription": "List debug threads",
+        "tags": ["debug-mcp"],
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "debugMcp_get_stack_trace",
+        "displayName": "Get stack trace",
+        "modelDescription": "Get the stack trace for a thread in the active debug session.",
+        "userDescription": "Read stack trace",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "threadId": { "type": "number" },
+            "levels": { "type": "number", "minimum": 1, "maximum": 200 }
+          }
+        }
+      },
+      {
+        "name": "debugMcp_get_scopes",
+        "displayName": "Get scopes",
+        "modelDescription": "Get the variable scopes for a given stack frame in the active debug session.",
+        "userDescription": "Read variable scopes",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["frameId"],
+          "properties": { "frameId": { "type": "number" } }
+        }
+      },
+      {
+        "name": "debugMcp_get_variables",
+        "displayName": "Get variables",
+        "modelDescription": "Get the variables under a given variablesReference (from get_scopes or a parent variable).",
+        "userDescription": "Read variables",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["variablesReference"],
+          "properties": { "variablesReference": { "type": "number" } }
+        }
+      },
+      {
+        "name": "debugMcp_evaluate_expression",
+        "displayName": "Evaluate expression",
+        "modelDescription": "Evaluate an expression in the active debug session. Avoid side-effecting expressions — they will mutate the running program.",
+        "userDescription": "Evaluate an expression at the current frame",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["expression"],
+          "properties": {
+            "expression": { "type": "string" },
+            "frameId": { "type": "number" },
+            "context": { "type": "string", "enum": ["watch", "repl", "hover"] }
+          }
+        }
+      },
+      {
+        "name": "debugMcp_get_all_breakpoints",
+        "displayName": "List breakpoints",
+        "modelDescription": "List all breakpoints registered in VS Code.",
+        "userDescription": "List breakpoints",
+        "tags": ["debug-mcp"],
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "debugMcp_set_breakpoint",
+        "displayName": "Set breakpoint",
+        "modelDescription": "Add a source breakpoint at the given file and 1-based line. Use absolute paths.",
+        "userDescription": "Set a breakpoint",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["file", "line"],
+          "properties": {
+            "file": { "type": "string", "description": "Absolute file path." },
+            "line": { "type": "number", "minimum": 1 },
+            "condition": { "type": "string" },
+            "hitCondition": { "type": "string" },
+            "logMessage": { "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "debugMcp_remove_breakpoint",
+        "displayName": "Remove breakpoint",
+        "modelDescription": "Remove a breakpoint by its ID (from get_all_breakpoints).",
+        "userDescription": "Remove a breakpoint",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } }
+        }
+      },
+      {
+        "name": "debugMcp_clear_all_breakpoints",
+        "displayName": "Clear all breakpoints",
+        "modelDescription": "Remove every breakpoint in VS Code. Destructive — confirms with the user first.",
+        "userDescription": "Clear all breakpoints",
+        "tags": ["debug-mcp"],
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "debugMcp_toggle_breakpoint",
+        "displayName": "Toggle breakpoint",
+        "modelDescription": "Toggle a source breakpoint at the given file/line (1-based).",
+        "userDescription": "Toggle a breakpoint",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["file", "line"],
+          "properties": {
+            "file": { "type": "string" },
+            "line": { "type": "number", "minimum": 1 }
+          }
+        }
+      },
+      {
+        "name": "debugMcp_list_tasks",
+        "displayName": "List tasks",
+        "modelDescription": "List all tasks visible to VS Code (workspace tasks.json + extension-contributed). Use this before suggesting a way to run a build/test/dev server — the user likely already defined a task.",
+        "userDescription": "Read tasks.json",
+        "tags": ["debug-mcp"],
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "debugMcp_run_task",
+        "displayName": "Run task",
+        "modelDescription": "Run a VS Code task by name. Prefer this over running commands directly in the terminal — tasks are visible to the user in VS Code and they can stop them. 'source' disambiguates when multiple tasks share a name.",
+        "userDescription": "Run a VS Code task",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" },
+            "source": { "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "debugMcp_list_running_tasks",
+        "displayName": "List running tasks",
+        "modelDescription": "List tasks currently being executed by VS Code.",
+        "userDescription": "List running tasks",
+        "tags": ["debug-mcp"],
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "debugMcp_stop_task",
+        "displayName": "Stop task",
+        "modelDescription": "Stop running task(s) by name (optionally filtered by source).",
+        "userDescription": "Stop a running task",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" },
+            "source": { "type": "string" }
+          }
+        }
+      },
+      {
+        "name": "debugMcp_list_terminals",
+        "displayName": "List terminals",
+        "modelDescription": "List terminals captured via VS Code shell integration.",
+        "userDescription": "List terminals",
+        "tags": ["debug-mcp"],
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "debugMcp_read_terminal",
+        "displayName": "Read terminal output",
+        "modelDescription": "Read captured output from a terminal by id or name. Each captured command is bracketed by a $ command header and a [exit N] footer.",
+        "userDescription": "Read terminal output",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["idOrName"],
+          "properties": {
+            "idOrName": { "type": "string" },
+            "tail": { "type": "number", "minimum": 1, "maximum": 10000 }
+          }
+        }
+      },
+      {
+        "name": "debugMcp_run_in_terminal",
+        "displayName": "Run command in terminal",
+        "modelDescription": "Send a command to a VS Code terminal. Prefer 'run_task' for anything the user might want to re-run.",
+        "userDescription": "Run a command in a terminal",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["command"],
+          "properties": {
+            "command": { "type": "string" },
+            "terminalName": { "type": "string" },
+            "createIfMissing": { "type": "boolean" }
+          }
+        }
+      },
+      {
+        "name": "debugMcp_read_debug_console",
+        "displayName": "Read debug console",
+        "modelDescription": "Read captured output from the VS Code debug console for the active or recent debug sessions.",
+        "userDescription": "Read debug console output",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "tail": { "type": "number", "minimum": 1, "maximum": 10000 }
+          }
+        }
+      },
+      {
+        "name": "debugMcp_eval_in_debug_console",
+        "displayName": "Evaluate in debug console",
+        "modelDescription": "Evaluate an expression in the debug console REPL of the active session. Avoid side-effecting expressions.",
+        "userDescription": "Evaluate in debug console",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "required": ["expression"],
+          "properties": {
+            "expression": { "type": "string" },
+            "frameId": { "type": "number" }
+          }
+        }
       }
     ],
     "configuration": {

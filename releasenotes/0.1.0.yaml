@@ -1,17 +1,22 @@
 version: 0.1.0
 date: 2026-05-24
 highlights:
-  - Initial release of the VS Code Debug MCP extension.
-  - Exposes debugging, launch configurations, tasks, terminals, and the debug console to MCP clients (Claude Code, Cursor, Copilot agent mode, etc.).
+  - Initial release. Drive your VS Code debugger, launch configs, tasks, terminals, and debug console from AI assistants.
+  - Two surfaces in one extension — an MCP server (Claude Code, Cursor, Windsurf) and Language Model Tools (Copilot agent mode, no MCP setup needed).
+  - Auto-updates from GitHub — no marketplace required.
 added:
   - Streamable HTTP MCP server bound to 127.0.0.1:6736 by default.
+  - Language Model Tools integration so Copilot agent mode can use the same capabilities without an MCP client. Write-y tools (start/stop debug, run/stop task, set/clear breakpoints, run in terminal, evaluate) confirm with the user before invoking; read-only tools run silently.
+  - One-click installer flow for Claude Code — registers the MCP server in .mcp.json (workspace) or ~/.claude/settings.json (user scope), and optionally installs the debug-mcp usage skill.
+  - debug-mcp usage skill bundled — teaches Claude to prefer launch.json + tasks over raw Bash so the user can interact with the running session.
   - Launch tools — list_launch_configurations, start_debugging, stop_debugging, continue/pause/step_over/in/out.
   - Debug state tools — get_threads, get_stack_trace, get_scopes, get_variables, evaluate_expression.
   - Breakpoint tools — set/remove/toggle/clear, get_all_breakpoints, get_breakpoint.
   - Task tools — list_tasks, run_task, list_running_tasks, stop_task.
   - Terminal capture via shell-integration with read_terminal, list_terminals, clear_terminal_buffer, run_in_terminal.
   - Debug console capture via DebugAdapterTracker with read_debug_console, clear_debug_console_buffer, eval_in_debug_console.
-  - Status bar item showing server state, with click-to-copy URL.
+  - GitHub-release auto-updater — checks every 6 hours, offers in-product install of the latest .vsix. Manual check via 'Debug MCP - Check for Updates'.
+  - Status-bar menu with context-aware actions (install / reconfigure Claude Code, copy URL, start/stop, check for updates, open log).
   - Sample workspace under sample-workspace/ for end-to-end testing.
 changed: []
 fixed: []

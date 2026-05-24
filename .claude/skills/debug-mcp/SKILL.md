@@ -1,108 +1,155 @@
 ---
 name: debug-mcp
-description: Use this skill when the user is debugging a running program, investigating a crash, looking into why something is failing at runtime, reproducing a bug, stepping through code execution, inspecting state in a paused program, or asking questions that depend on values at runtime rather than static code. Provides guidance for driving the VS Code Debug MCP server's tools (start_debugging, breakpoints, stack/scope/variables, run_task, read_terminal, read_debug_console).
+description: Use this skill when the user is debugging a running program, investigating a crash, looking into why something is failing at runtime, reproducing a bug, stepping through code execution, inspecting state in a paused program, asking questions that depend on values at runtime, or asking you to "run" something they want to interact with. Provides guidance for driving the VS Code Debug MCP server tools — preferring VS Code's launch.json and tasks.json over raw Bash so the user can interact with the running process in their editor.
 ---
 
-# Debug MCP — how to use the VS Code Debug MCP tools
+# Debug MCP — driving VS Code from your tool calls
 
-This skill is for the [`vscode-debug-mcp`](https://github.com/cgaspard/vscode-debug-mcp) VS Code extension, which exposes the active VS Code session over MCP. The tools below all run *inside* the user's live VS Code — every action (a breakpoint, a task run, a step) is visible to the user in their editor.
+This skill is for the [`vscode-debug-mcp`](https://github.com/cgaspard/vscode-debug-mcp) extension. The tools below run *inside* the user's live VS Code window — every action (launching a program, setting a breakpoint, running a task) is visible to the user in their editor, and the user can interact with the running session normally (set their own breakpoints, type in the integrated terminal, evaluate in the debug console).
 
-## When to reach for these tools
+**This is the headline insight: when you launch via these tools, the user is a participant, not a spectator.** A `Bash` invocation gives you output and ends. A `start_debugging` or `run_task` call hands the user a real, interactive VS Code session they can drive alongside you.
 
-**Use them when:**
+## When to reach for these tools (vs. Bash)
+
+**Prefer these tools over `Bash` whenever the user might want to interact with the process:**
+
+| Situation | Wrong | Right |
+| --- | --- | --- |
+| User wants to "run the app and see what happens" | `Bash node app.js` | `start_debugging` with a launch.json config (or create one) |
+| User wants to run tests they may want to debug | `Bash npm test` | `run_task` (their npm test task) or `start_debugging` (Jest/Mocha launch config) |
+| Build/lint/format where output is all you need | (Bash is fine) | `Bash` |
+| User wants to reproduce a runtime bug | `Bash` then read logs | `start_debugging` so they can set breakpoints |
+| User says "start the server" | `Bash npm start` (orphans on next call) | `run_task` (managed by VS Code, visible, can be stopped) |
+
+The user already configured their preferred way to run things in [`launch.json`](https://code.visualstudio.com/docs/editor/debugging) and [`tasks.json`](https://code.visualstudio.com/docs/editor/tasks). Use those configurations — they bake in the correct working directory, env vars, args, debugger type, and pre-launch steps. Re-deriving that in `Bash` is fragile and bypasses everything the user set up.
+
+**Use these tools when:**
 - The user is investigating a runtime bug, crash, or unexpected behavior
+- The user wants to *run something* (program, tests, server) and may want to interact with it
 - A test or program is failing and the root cause isn't obvious from reading the code
-- The user asks "what is the value of X when …" or "where does control flow go when …"
-- The user wants to step through code or set a breakpoint
-- You need terminal/console output from a command the user ran in VS Code
+- You need to inspect runtime values, stack frames, or threaded state
+- You need terminal/debug-console output from a long-running process the user can see
 
 **Don't use them for:**
 - Static code review, refactoring, or syntax questions
-- Reading files (use Read instead — much cheaper)
-- Running build/lint commands when you don't need to observe live output (Bash is fine)
-- Speculative "let me explore the codebase" work — these tools are for live state, not source exploration
+- Reading files (use Read — much cheaper)
+- One-shot non-interactive commands where you only need the output (Bash is fine)
+- Exploring the codebase ("where is X defined?") — these tools are for live state
 
-The tools cost more than reading source code, both in latency and in disturbing the user's editor. Default to static analysis; reach for the debugger when you need runtime truth.
+## The launch-vs-bash decision flow
+
+Before reaching for `Bash` to start a process, ask: **"Will the user want to interact with this once it's running?"**
+
+If yes → use these tools, in this priority order:
+
+1. **Is there an existing launch.json config that matches?** Call `list_launch_configurations` first. If one matches the user's intent, call `start_debugging` with that name. The user gets a full debug session: breakpoints, variables panel, debug console, the works.
+2. **Is there an existing tasks.json task that matches?** Call `list_tasks`. If one matches, call `run_task`. Tasks are right for long-running processes (dev servers, watchers) and for build-style operations where you want VS Code to track the running state.
+3. **Neither exists, but the user clearly wants something runnable?** Offer to *add* a launch config or task to their workspace. Show the proposed JSON, get their OK, then write it. They keep the config for next time.
+4. **It's truly a one-shot non-interactive command?** `Bash` is fine.
+
+If no, the user just wants output: `Bash` is fine.
+
+### Why this matters
+
+When you `Bash node app.js`, the process is yours. It runs in *your* Bash session, the user can't see its terminal, can't stop it gracefully, can't set breakpoints, and the process gets orphaned the moment your next tool call returns. The user has to ask you "is it still running?" — they're flying blind.
+
+When you `start_debugging`, the process runs in *the user's* VS Code. They see the terminal, they can poke at breakpoints, they can stop it with the debug toolbar, they can attach the debugger to inspect a hang. You can read the debug console output via `read_debug_console` whenever you need it. Total visibility, total user agency.
 
 ## Tool catalog
 
 ### Launch & sessions
-- `list_launch_configurations` — what's in `launch.json`. Use first to learn what configurations exist before asking the user
-- `start_debugging(name?, workspaceFolder?)` — start a session by name. Omit `name` for VS Code's default
-- `stop_debugging` — terminate the active session
-- `continue_execution`, `pause_execution`, `step_over`, `step_in`, `step_out` — execution control. All take optional `threadId`; omit to use the first thread
+- `list_launch_configurations` — what's in `launch.json`. **Call this first** before suggesting a launch.
+- `start_debugging(name?, workspaceFolder?)` — start a session by configuration name. Omit `name` for the workspace default.
+- `stop_debugging` — terminate the active session.
+- `continue_execution`, `pause_execution`, `step_over`, `step_in`, `step_out` — execution control. All take optional `threadId`; omit to target the first thread.
 
-### State inspection (only meaningful while paused)
-- `get_threads` — usually one in a normal program, more in multithreaded code
-- `get_stack_trace(threadId?, levels?)` — frames from top of stack down
-- `get_scopes(frameId)` — what's in scope at a frame (Local, Closure, Global)
-- `get_variables(variablesReference)` — expand a scope or a parent variable. References are returned by `get_scopes` and by other variables; they're not stable across sessions
-- `evaluate_expression(expression, frameId?, context?)` — evaluate in the paused context. `context: 'repl'` (default) for one-offs, `'watch'` for things you'll watch
+### Tasks
+- `list_tasks` — all tasks visible to VS Code (workspace + extension-contributed).
+- `run_task(name, source?)` — execute a task by name. `source` disambiguates when multiple tasks share a name (e.g. `"Workspace"` vs `"npm"`).
+- `list_running_tasks` — what's currently executing.
+- `stop_task(name, source?)` — terminate a running task.
+
+### State inspection (only meaningful while paused at a breakpoint)
+- `get_threads` — usually one in a normal program, more in multithreaded code.
+- `get_stack_trace(threadId?, levels?)` — frames from top of stack down.
+- `get_scopes(frameId)` — what's in scope at a frame (Local, Closure, Global).
+- `get_variables(variablesReference)` — expand a scope or a parent variable. References are returned by `get_scopes` and other variables — not stable across sessions or after `continue_execution`.
+- `evaluate_expression(expression, frameId?, context?)` — evaluate in the paused context. `context: 'repl'` is the default; use `'watch'` for things you'll watch repeatedly.
 
 ### Breakpoints
-- `set_breakpoint(file, line, condition?, hitCondition?, logMessage?)` — `file` is an absolute path, `line` is 1-based
-- `toggle_breakpoint(file, line)` — flip a breakpoint on/off
-- `remove_breakpoint(id)`, `clear_all_breakpoints`, `get_all_breakpoints`, `get_breakpoint(id)`
-
-### Tasks (`tasks.json` + extension-contributed)
-- `list_tasks` — all tasks visible to VS Code
-- `run_task(name, source?)` — execute by name. `source` disambiguates when multiple tasks share a name (e.g. `"Workspace"` vs `"npm"`)
-- `list_running_tasks`, `stop_task(name, source?)`
+- `set_breakpoint(file, line, condition?, hitCondition?, logMessage?)` — `file` is an absolute path, `line` is 1-based.
+- `toggle_breakpoint(file, line)` — flip a breakpoint on/off.
+- `remove_breakpoint(id)`, `clear_all_breakpoints`, `get_all_breakpoints`, `get_breakpoint(id)`.
 
 ### Terminals (captured via shell integration)
 - `list_terminals`
-- `read_terminal(idOrName, tail?)` — output is captured per-command between `$ cmd` headers and `[exit N]` footers
-- `run_in_terminal(command, terminalName?, createIfMissing?)` — sends a command; follow up with `read_terminal` to read output
+- `read_terminal(idOrName, tail?)` — output captured per-command between `$ cmd` headers and `[exit N]` footers.
+- `run_in_terminal(command, terminalName?, createIfMissing?)` — sends a command to an existing or new terminal; follow up with `read_terminal` to read output. *Prefer `run_task` over this for anything the user might want to re-run.*
 - `clear_terminal_buffer(idOrName)`
 
-### Debug console
-- `read_debug_console(tail?)` — output emitted by `console.log` / equivalent during debug sessions
-- `eval_in_debug_console(expression, frameId?)` — REPL-style evaluation in the active session
+### Debug console (the panel that shows your debug session's `console.log` etc.)
+- `read_debug_console(tail?)` — output the running debug session has emitted.
+- `eval_in_debug_console(expression, frameId?)` — REPL-style evaluation in the active session.
 - `clear_debug_console_buffer`
 
 ## Standard playbooks
 
-### "This test/program is failing — figure out why"
-1. `list_launch_configurations` to find a config that runs the failing scenario. If none exists, ask the user.
-2. Identify the line(s) where you suspect the bug. Read the source first (`Read`, `Grep`) to form a hypothesis — don't shotgun breakpoints.
-3. `set_breakpoint` at the most informative line (usually just before the suspected failure, or at the function entry of the function that's misbehaving).
-4. `start_debugging` with the right configuration name.
-5. When it hits: `get_threads` → pick the paused thread → `get_stack_trace(threadId)`.
-6. `get_scopes(frameId)` on the frame at the breakpoint → `get_variables(variablesReference)` on Local first. Only descend into variables that look suspicious. Don't expand every reference — it's noisy.
-7. `evaluate_expression` to test hypotheses (e.g., `evaluate_expression("user.permissions.length")`). Avoid expressions with side effects.
-8. `step_over` / `step_in` only as needed. Each step is a round-trip; don't step blindly. If you know where to look next, set another breakpoint and `continue_execution` instead.
-9. When done: `stop_debugging` and `clear_all_breakpoints` if you created throwaway ones.
+### "Run this and see what happens" / "Start the app"
 
-### "Reproduce a bug the user is seeing in the terminal"
-1. `list_terminals` to find their terminal (or have them run the command, then `list_terminals`).
-2. `read_terminal(idOrName)` to see what they saw.
-3. If you need to re-run with debugging: identify the failing command, find/create a matching launch config, then follow the playbook above.
+Goal: hand the user a session they can interact with.
+
+1. `list_launch_configurations` → does a config match what they want?
+   - **Yes:** `start_debugging(name)`. Done. Watch progress via `read_debug_console`.
+   - **No, but a task fits:** `list_tasks` → `run_task(name)`. Use this for dev servers, watchers, build pipelines.
+   - **Neither exists:** Look at the project (package.json scripts, Cargo.toml binaries, etc.) and propose a launch config. Show the user the JSON, write it to `.vscode/launch.json` after their OK, then `start_debugging`.
+
+### "This test/program is failing — figure out why"
+
+1. `list_launch_configurations` to find a config that runs the failing scenario (or create one as above).
+2. Identify the line(s) where you suspect the bug. **Read source first** (`Read`, `Grep`) — form a hypothesis before setting breakpoints. Shotgun breakpoints waste round-trips.
+3. `set_breakpoint` at the most informative line — usually just before the suspected failure, or at the function entry of the misbehaving function.
+4. `start_debugging` with that configuration.
+5. When it pauses: `get_threads` → pick the paused thread → `get_stack_trace(threadId)`.
+6. `get_scopes(frameId)` on the frame at the breakpoint → `get_variables(variablesReference)` on **Local** first. Only descend into variables that look suspicious — don't expand every reference, it's noisy.
+7. `evaluate_expression` to test hypotheses (e.g. `evaluate_expression("user.permissions.length")`). **Avoid expressions with side effects** — they mutate the program you're debugging.
+8. `step_over` / `step_in` only as needed. Each step is a round-trip; don't step blindly. If you know where to look next, `set_breakpoint` there and `continue_execution`.
+9. When done: `stop_debugging` and `clear_all_breakpoints` for throwaway ones.
+
+### "Run my dev server / start the watcher"
+
+1. `list_tasks` to find their task (commonly named "dev", "watch", "start", or the npm script name).
+2. `run_task(name, source?)` — `source` disambiguates duplicates.
+3. The task's terminal opens in VS Code. The user can see it, type in it, and stop it from the task panel.
+4. To read output: `list_terminals` → `read_terminal`. (Note: only commands run via shell integration are captured cleanly — some tasks with custom executors may not be.)
+5. Don't `Bash npm start &` as an alternative. Backgrounded Bash processes get orphaned between tool calls and the user can't see them.
+
+### "Reproduce a bug the user is seeing"
+
+1. `list_terminals` → `read_terminal(idOrName)` to see what they're already seeing.
+2. To re-run with debugging: pick the matching launch config (or create one), then follow the failure-investigation playbook above.
 
 ### "Stack trace from a log — where in the code is this?"
-1. Don't start debugging just to map a stack frame to source. Use `Read` and `Grep` on the source first.
-2. Only start a debug session if the bug isn't obvious from the code and you need runtime values.
 
-### "Run a build/test task and watch the output"
-1. `list_tasks` to find the task.
-2. `run_task(name, source?)` — `source` is needed when multiple tasks share a name.
-3. The task's output appears in a VS Code terminal. `list_terminals` → `read_terminal` to read it. (Note: only commands run *via shell integration* are captured — tasks using a custom executor may not be.)
-4. `list_running_tasks` to see what's running; `stop_task` to terminate.
+1. **Don't start debugging just to map a frame to source.** Use `Read` and `Grep` first.
+2. Only start a debug session if the bug isn't obvious from the code and you need runtime values.
 
 ## Gotchas
 
-- **Breakpoints want absolute paths.** Relative paths usually still work but absolute is unambiguous. Convert before calling `set_breakpoint`.
-- **`variablesReference` is per-session.** Don't reuse it across sessions or after `continue_execution`.
-- **Don't `evaluate_expression` with side effects.** Calling functions that mutate state changes the program you're debugging. If you need a side-effecting call, tell the user what you're about to do.
-- **Terminal capture requires shell integration.** If `read_terminal` returns an empty buffer, the user's shell may not have integration active. They can verify by looking for the "command decoration" gutter marks next to their prompts in VS Code.
+- **Breakpoints want absolute paths.** Relative paths usually still resolve but absolute is unambiguous. Convert before calling `set_breakpoint`.
+- **`variablesReference` is per-session.** Don't reuse references across sessions or after `continue_execution` — they're invalidated.
+- **Never `evaluate_expression` with side effects.** Calling functions that mutate state corrupts what you're debugging. If you really need a side-effecting call, tell the user first.
+- **Terminal capture needs shell integration.** If `read_terminal` returns an empty buffer, the user's shell may not have integration active. They can verify by looking for the prompt decoration gutter marks next to commands in VS Code's terminal.
 - **The debug console buffer is cumulative across sessions** until cleared. If the user starts a new session and asks about its output, consider `clear_debug_console_buffer` first.
-- **Don't dump the whole variable tree.** When `get_variables` returns 200 entries, summarize or filter — don't paste all of it into your reply.
-- **One session at a time.** `vscode.debug.activeDebugSession` is whichever was started most recently. If the user has multiple debug sessions, ask which one before stepping.
+- **Don't dump the whole variable tree.** When `get_variables` returns 200 entries, summarize or filter — don't paste it all into your reply.
+- **One active session at a time** is what `start_debugging`/stepping tools target. If the user has multiple debug sessions, ask which they mean.
+- **Prefer creating a launch config over inventing flags inside `start_debugging`.** The config lives in `.vscode/launch.json`, so the user can re-run from VS Code's UI later without you.
 
 ## What success looks like
 
-A good debug-MCP interaction is short and pointed:
+A good debug-MCP interaction:
+- Hands the user a session they can drive — they see what's happening, you both read from the same screen
 - One or two breakpoints in the right places, not ten in hopeful ones
-- A clear narrative back to the user: "I paused at line 42 in `processOrder`. At that point, `order.items` was empty even though the input had 3 items. Stepping back, `parseInput` is silently dropping items when the JSON has trailing commas. Fix: …"
-- The session is stopped and throwaway breakpoints are cleared when you're done
+- A clear narrative back to the user: "I paused at line 42 in `processOrder`. `order.items` was empty even though the input had 3 items. Stepping back, `parseInput` is silently dropping items when the JSON has trailing commas."
+- Throwaway breakpoints cleared and the session stopped when done
 
-If you find yourself stepping line-by-line through unfamiliar code, stop and re-read the source instead — debugging is for confirming hypotheses, not for code reading.
+If you find yourself stepping line-by-line through unfamiliar code, stop and re-read the source — the debugger is for confirming hypotheses, not for code reading.

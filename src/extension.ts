@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { CaptureManager } from './capture';
 import { startMcpServer, type RunningServer } from './mcpServer';
 import { offerInstall, resetInstallPromptFlag, getConfigState, claudeCodeInstalled } from './firstRun';
+import { registerLmTools } from './lmTools';
+import { checkForUpdate } from './updater';
 
 let capture: CaptureManager | undefined;
 let server: RunningServer | undefined;
@@ -95,6 +97,11 @@ async function showStatusBarMenu() {
   }
 
   items.push({
+    id: 'checkUpdate',
+    label: '$(cloud-download) Check for updates',
+    description: 'Look for a newer release on GitHub'
+  });
+  items.push({
     id: 'output',
     label: '$(output) Open Debug MCP log',
     description: 'View extension output channel'
@@ -132,6 +139,9 @@ async function showStatusBarMenu() {
     case 'installInfo':
       await vscode.env.openExternal(vscode.Uri.parse('vscode:extension/anthropic.claude-code'));
       break;
+    case 'checkUpdate':
+      await vscode.commands.executeCommand('vscodeDebugMcp.checkForUpdates');
+      break;
   }
 }
 
@@ -141,6 +151,7 @@ async function startServer() {
     return;
   }
   if (!capture) {
+    // Should have been created during activate(), but be defensive.
     capture = new CaptureManager(() =>
       vscode.workspace.getConfiguration('vscodeDebugMcp').get<number>('terminalBufferLines', 2000)
     );
@@ -211,7 +222,10 @@ export async function activate(context: vscode.ExtensionContext) {
       await resetInstallPromptFlag(context);
       vscode.window.showInformationMessage('Debug MCP: install prompt will show again next activation.');
     }),
-    vscode.commands.registerCommand('vscodeDebugMcp.showMenu', showStatusBarMenu)
+    vscode.commands.registerCommand('vscodeDebugMcp.showMenu', showStatusBarMenu),
+    vscode.commands.registerCommand('vscodeDebugMcp.checkForUpdates', async () => {
+      await checkForUpdate(context, { force: true });
+    })
   );
 
   context.subscriptions.push({
@@ -224,10 +238,29 @@ export async function activate(context: vscode.ExtensionContext) {
 
   updateStatusBar();
 
+  // Make sure capture is alive so LM tools can read terminal/console buffers
+  // even before the user starts the MCP server.
+  if (!capture) {
+    capture = new CaptureManager(() =>
+      vscode.workspace.getConfiguration('vscodeDebugMcp').get<number>('terminalBufferLines', 2000)
+    );
+  }
+
+  // Register Language Model tools so Copilot Chat (agent mode) and other
+  // vscode.lm consumers can call our handlers without going through MCP.
+  try {
+    registerLmTools(context, capture);
+  } catch (err) {
+    log(`Failed to register Language Model tools: ${err instanceof Error ? err.message : err}`);
+  }
+
   const autoStart = vscode.workspace.getConfiguration('vscodeDebugMcp').get<boolean>('autoStart', true);
   if (autoStart) {
     await startServer();
   }
+
+  // Background: ask GitHub if there's a newer release.
+  void checkForUpdate(context, { silent: true });
 }
 
 export function deactivate() {
