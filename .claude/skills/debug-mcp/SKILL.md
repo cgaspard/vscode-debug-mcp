@@ -55,7 +55,25 @@ When you `Bash node app.js`, the process is yours. It runs in *your* Bash sessio
 
 When you `start_debugging`, the process runs in *the user's* VS Code. They see the terminal, they can poke at breakpoints, they can stop it with the debug toolbar, they can attach the debugger to inspect a hang. You can read the debug console output via `read_debug_console` whenever you need it. Total visibility, total user agency.
 
+## Multi-window setups: bind to a workspace first
+
+If the user has multiple VS Code windows open, they all share a **single Debug MCP server** running in one "leader" window. The other windows register as followers. Every tool call has to know *which* window to target.
+
+**At the start of any session (or whenever the user switches focus to a different repo), call `list_workspaces` first.** It returns one entry per open VS Code window with `{ id, name, path }`.
+
+- **Single workspace returned**: nothing to do. All tool calls go there automatically.
+- **Multiple workspaces returned**: figure out which one the user wants based on (a) the paths of files they're @-mentioning, (b) names they say out loud, (c) the active editor selection's file path. Then call `bind_workspace({ workspaceId: "<id>" })` to lock subsequent calls to that window.
+- **User switches mid-conversation** ("now work in the other window"): call `list_workspaces` again, pick the new one, call `bind_workspace`.
+
+Without `bind_workspace`, calls go to the leader window's workspace by default. That's fine for single-window setups but probably wrong if the user opened the leader for a completely different project.
+
+`bind_workspace` is session-scoped — it only affects the current MCP chat session, and the binding clears when the session ends.
+
 ## Tool catalog
+
+### Multi-window
+- `list_workspaces` — list all VS Code windows registered with this MCP cluster. Each has `{ id, name, path }`.
+- `bind_workspace(workspaceId)` — bind this MCP session to a specific workspace by id. All subsequent calls in this session route to that window.
 
 ### Launch & sessions
 - `list_launch_configurations` — what's in `launch.json`. **Call this first** before suggesting a launch.

@@ -1,15 +1,43 @@
 import * as vscode from 'vscode';
 import { CaptureManager } from './capture';
-import { startMcpServer, type RunningServer } from './mcpServer';
+import { startMcpServer, type RunningServer, type MCPServerEnv } from './mcpServer';
 import { offerInstall, resetInstallPromptFlag, getConfigState, claudeCodeInstalled } from './firstRun';
 import { registerLmTools } from './lmTools';
 import { checkForUpdate } from './updater';
+import { buildLocalToolHandlers, type Tool } from './toolHandlers';
+import {
+  Leader,
+  Follower,
+  discoverRole,
+  workspaceIdFor,
+  type WorkspaceInfo
+} from './cluster';
 
 let capture: CaptureManager | undefined;
 let server: RunningServer | undefined;
 let statusBar: vscode.StatusBarItem | undefined;
 let output: vscode.OutputChannel | undefined;
 let extensionContext: vscode.ExtensionContext | undefined;
+
+let role: 'leader' | 'follower' | 'standalone' = 'standalone';
+let leader: Leader | undefined;
+let follower: Follower | undefined;
+let localHandlers: Record<string, Tool> | undefined;
+let ownWorkspace: WorkspaceInfo | undefined;
+
+function computeOwnWorkspace(): WorkspaceInfo {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  const absPath = folder?.uri.fsPath ?? `<no-workspace:${process.pid}>`;
+  const name = folder?.name ?? `(no workspace, pid ${process.pid})`;
+  return { id: workspaceIdFor(absPath), name, path: absPath };
+}
+
+function runLocalTool(tool: string, args: any): Promise<unknown> | unknown {
+  const handlers = localHandlers ?? (localHandlers = buildLocalToolHandlers(capture!));
+  const handler = handlers[tool];
+  if (!handler) throw new Error(`Unknown tool: ${tool}`);
+  return handler(args ?? {});
+}
 
 function log(msg: string) {
   if (!output) output = vscode.window.createOutputChannel('Debug MCP');
@@ -19,12 +47,18 @@ function log(msg: string) {
 
 function updateStatusBar() {
   if (!statusBar) return;
-  if (server) {
+  if (role === 'leader' && server) {
+    statusBar.text = `$(debug-alt) MCP :${server.port} (leader)`;
+    statusBar.tooltip = `Debug MCP leader — MCP server at ${server.url}\nThis window owns the MCP server; other VS Code windows connect to this one.\nClick for actions.`;
+  } else if (role === 'follower') {
+    statusBar.text = '$(debug-alt) MCP (follower)';
+    statusBar.tooltip = 'Debug MCP follower — registered with the leader window.\nThe leader serves MCP at the configured port; this window\'s workspace is reachable through it.\nClick for actions.';
+  } else if (role === 'standalone' && server) {
     statusBar.text = `$(debug-alt) MCP :${server.port}`;
-    statusBar.tooltip = `Debug MCP server running at ${server.url}\nClick for actions (install, copy URL, stop…).`;
+    statusBar.tooltip = `Debug MCP server running at ${server.url}\nClick for actions.`;
   } else {
     statusBar.text = '$(debug-alt) MCP off';
-    statusBar.tooltip = 'Debug MCP server is stopped. Click for actions.';
+    statusBar.tooltip = 'Debug MCP is stopped. Click for actions.';
   }
   statusBar.command = 'vscodeDebugMcp.showMenu';
   statusBar.show();
@@ -43,11 +77,17 @@ async function showStatusBarMenu() {
       label: '$(clippy) Copy server URL',
       description: server.url
     });
+  } else if (role === 'follower') {
+    items.push({
+      id: 'info',
+      label: '$(link) Following leader window',
+      description: `Workspace "${ownWorkspace?.name ?? '?'}" is reachable via the leader's MCP server`
+    });
   } else {
     items.push({
       id: 'start',
       label: '$(play) Start MCP server',
-      description: 'Bind the local HTTP server'
+      description: 'Bind the local HTTP server (or join an existing leader)'
     });
   }
 
@@ -142,44 +182,124 @@ async function showStatusBarMenu() {
     case 'checkUpdate':
       await vscode.commands.executeCommand('vscodeDebugMcp.checkForUpdates');
       break;
+    case 'info':
+      // No-op informational item.
+      break;
   }
 }
 
 async function startServer() {
-  if (server) {
-    vscode.window.showInformationMessage(`Debug MCP already running at ${server.url}`);
+  if (server || role === 'follower') {
+    const where = server ? server.url : 'leader window';
+    vscode.window.showInformationMessage(`Debug MCP already active (${where})`);
     return;
   }
   if (!capture) {
-    // Should have been created during activate(), but be defensive.
     capture = new CaptureManager(() =>
       vscode.workspace.getConfiguration('vscodeDebugMcp').get<number>('terminalBufferLines', 2000)
     );
   }
+  if (!ownWorkspace) ownWorkspace = computeOwnWorkspace();
+
+  // Decide leader vs follower
+  const discovery = await discoverRole();
+  if (discovery.role === 'follower' && discovery.leaderSocketPath) {
+    await becomeFollower(discovery.leaderSocketPath);
+  } else {
+    await becomeLeader();
+  }
+  updateStatusBar();
+}
+
+async function becomeLeader(): Promise<void> {
+  if (!ownWorkspace) ownWorkspace = computeOwnWorkspace();
   try {
-    server = await startMcpServer(capture);
-    log(`MCP server listening at ${server.url}`);
-    vscode.window.showInformationMessage(`Debug MCP running at ${server.url}`);
+    leader = new Leader(ownWorkspace, async (tool, args) => runLocalTool(tool, args));
+    await leader.start();
+    leader.on('workspaces-changed', () => {
+      log(`Cluster workspaces: ${leader!.listWorkspaces().map((w) => w.name).join(', ')}`);
+    });
+
+    const env: MCPServerEnv = {
+      dispatch: (workspaceId, tool, args) => leader!.dispatch(workspaceId, tool, args) as Promise<unknown>,
+      listWorkspaces: () => leader!.listWorkspaces(),
+      defaultWorkspaceId: () => leader!.getOwnWorkspace().id
+    };
+
+    server = await startMcpServer(env);
+    role = 'leader';
+    log(`Leader: MCP server listening at ${server.url}`);
+    vscode.window.showInformationMessage(`Debug MCP running at ${server.url} (leader)`);
     if (extensionContext) {
       void offerInstall(extensionContext, server.url);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log(`Failed to start MCP server: ${msg}`);
+    log(`Failed to start as leader: ${msg}`);
     vscode.window.showErrorMessage(`Failed to start Debug MCP: ${msg}`);
+    if (leader) {
+      await leader.stop().catch(() => {});
+      leader = undefined;
+    }
   }
-  updateStatusBar();
+}
+
+async function becomeFollower(leaderSocketPath: string): Promise<void> {
+  if (!ownWorkspace) ownWorkspace = computeOwnWorkspace();
+  try {
+    follower = new Follower(ownWorkspace, leaderSocketPath, async (tool, args) =>
+      runLocalTool(tool, args)
+    );
+    await follower.connect();
+    role = 'follower';
+    log(`Follower: registered with leader at ${leaderSocketPath}`);
+    vscode.window.showInformationMessage(
+      `Debug MCP joined as follower. Workspace "${ownWorkspace.name}" is reachable via the leader window.`
+    );
+
+    follower.on('disconnected', () => {
+      log('Follower: leader disconnected. Attempting promotion…');
+      follower = undefined;
+      role = 'standalone';
+      updateStatusBar();
+      // Wait a moment then try to become the leader. If multiple
+      // followers race, only one will win the port; the others will
+      // re-discover and refollow.
+      setTimeout(() => {
+        void startServer();
+      }, 500 + Math.floor(Math.random() * 500));
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`Failed to attach to leader: ${msg}. Trying to become leader.`);
+    follower = undefined;
+    await becomeLeader();
+  }
 }
 
 async function stopServer() {
-  if (!server) return;
-  try {
-    await server.stop();
-    log('MCP server stopped.');
-  } catch (err) {
-    log(`Error stopping server: ${err instanceof Error ? err.message : err}`);
+  if (role === 'follower' && follower) {
+    await follower.disconnect();
+    follower = undefined;
+    role = 'standalone';
+    log('Follower: disconnected from leader.');
+    updateStatusBar();
+    return;
   }
-  server = undefined;
+  if (server) {
+    try {
+      await server.stop();
+      log('MCP server stopped.');
+    } catch (err) {
+      log(`Error stopping server: ${err instanceof Error ? err.message : err}`);
+    }
+    server = undefined;
+  }
+  if (leader) {
+    await leader.stop().catch(() => {});
+    leader = undefined;
+  }
+  role = 'standalone';
   updateStatusBar();
 }
 

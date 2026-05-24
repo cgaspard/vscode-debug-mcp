@@ -7,9 +7,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import { CaptureManager } from './capture';
-import { debugOps } from './debugOps';
-import { listTasks, runTask, listRunningTasks, stopTask } from './tasks';
+import type { WorkspaceInfo } from './cluster';
 
 function jsonResult(value: unknown) {
   return {
@@ -30,11 +28,31 @@ function errorResult(err: unknown) {
   };
 }
 
-function buildMcpServer(capture: CaptureManager): McpServer {
+/**
+ * The shape the MCP server expects from its hosting environment. The
+ * hosting code is responsible for routing dispatch() to either the local
+ * window or another window's follower over the cluster IPC.
+ */
+export interface MCPServerEnv {
+  /** Run a tool against a specific workspace. */
+  dispatch(workspaceId: string | undefined, tool: string, args: any): Promise<unknown>;
+  /** List all known workspaces in the cluster. */
+  listWorkspaces(): WorkspaceInfo[];
+  /** The workspace ID to use when no binding has been made yet. */
+  defaultWorkspaceId(): string;
+}
+
+function buildMcpServer(env: MCPServerEnv, sessionWorkspace: Map<string, string>, sessionId: () => string | undefined): McpServer {
   const server = new McpServer(
     { name: 'vscode-debug-mcp', version: '0.1.0' },
     { capabilities: { tools: {}, logging: {} } }
   );
+
+  const currentWorkspace = (): string | undefined => {
+    const sid = sessionId();
+    if (sid && sessionWorkspace.has(sid)) return sessionWorkspace.get(sid);
+    return env.defaultWorkspaceId();
+  };
 
   const tool = (
     name: string,
@@ -52,195 +70,121 @@ function buildMcpServer(capture: CaptureManager): McpServer {
     });
   };
 
-  // ---------- Launch / sessions ----------
-  tool('list_launch_configurations', 'List debug configurations defined in launch.json across workspace folders.', {}, async () => {
-    return debugOps.listConfigurations();
-  });
+  // Forwarded tool: routes to the workspace bound to this MCP session.
+  const forwarded = (
+    name: string,
+    description: string,
+    schema: z.ZodRawShape
+  ) => {
+    tool(name, description, schema, async (args: any) => {
+      return env.dispatch(currentWorkspace(), name, args);
+    });
+  };
 
+  // ---------- Multi-window workspace tools ----------
   tool(
-    'start_debugging',
-    'Start a debug session by launch.json configuration name. Omit name to use the workspace default.',
-    {
-      name: z.string().optional().describe('Configuration name from launch.json'),
-      workspaceFolder: z.string().optional().describe('Workspace folder name (optional)')
-    },
-    async ({ name, workspaceFolder }) => debugOps.start(name, workspaceFolder)
-  );
-
-  tool('stop_debugging', 'Stop the active debug session.', {}, async () => debugOps.stop());
-
-  tool('continue_execution', 'Continue execution in the active debug session.', { threadId: z.number().int().optional() }, async ({ threadId }) => {
-    await debugOps.continue(threadId);
-    return { ok: true };
-  });
-
-  tool('pause_execution', 'Pause execution in the active debug session.', { threadId: z.number().int().optional() }, async ({ threadId }) => {
-    await debugOps.pause(threadId);
-    return { ok: true };
-  });
-
-  tool('step_over', 'Step over the current statement.', { threadId: z.number().int().optional() }, async ({ threadId }) => {
-    await debugOps.stepOver(threadId);
-    return { ok: true };
-  });
-
-  tool('step_in', 'Step into the next function call.', { threadId: z.number().int().optional() }, async ({ threadId }) => {
-    await debugOps.stepIn(threadId);
-    return { ok: true };
-  });
-
-  tool('step_out', 'Step out of the current function.', { threadId: z.number().int().optional() }, async ({ threadId }) => {
-    await debugOps.stepOut(threadId);
-    return { ok: true };
-  });
-
-  // ---------- State inspection ----------
-  tool('get_threads', 'List threads in the active debug session.', {}, async () => debugOps.getThreads());
-
-  tool(
-    'get_stack_trace',
-    'Get the stack trace for a thread (defaults to first thread).',
-    { threadId: z.number().int().optional(), levels: z.number().int().min(1).max(200).optional() },
-    async ({ threadId, levels }) => debugOps.getStackTrace(threadId, levels ?? 20)
-  );
-
-  tool('get_scopes', 'Get scopes for a stack frame.', { frameId: z.number().int() }, async ({ frameId }) => debugOps.getScopes(frameId));
-
-  tool(
-    'get_variables',
-    'Get variables for a given variablesReference (from a scope or parent variable).',
-    { variablesReference: z.number().int() },
-    async ({ variablesReference }) => debugOps.getVariables(variablesReference)
+    'list_workspaces',
+    'List all VS Code workspaces currently registered with this Debug MCP cluster (across all open windows). Each workspace has a stable id (sha256 hash slice of its path), a name (folder basename), and an absolute path. Use this when the user has multiple VS Code windows open to discover which one you should target.',
+    {},
+    () => env.listWorkspaces()
   );
 
   tool(
-    'evaluate_expression',
-    'Evaluate an expression in the active debug session.',
-    {
-      expression: z.string(),
-      frameId: z.number().int().optional(),
-      context: z.enum(['watch', 'repl', 'hover']).optional()
-    },
-    async ({ expression, frameId, context }) => debugOps.evaluate(expression, frameId, context)
-  );
-
-  // ---------- Breakpoints ----------
-  tool('get_all_breakpoints', 'List all breakpoints.', {}, async () => debugOps.getAllBreakpoints());
-
-  tool('get_breakpoint', 'Get a breakpoint by ID.', { id: z.string() }, async ({ id }) => debugOps.getBreakpoint(id) ?? null);
-
-  tool(
-    'set_breakpoint',
-    'Add a source breakpoint at file/line. Line is 1-based.',
-    {
-      file: z.string(),
-      line: z.number().int().min(1),
-      condition: z.string().optional(),
-      hitCondition: z.string().optional(),
-      logMessage: z.string().optional()
-    },
-    async ({ file, line, condition, hitCondition, logMessage }) =>
-      debugOps.setBreakpoint(file, line, { condition, hitCondition, logMessage })
-  );
-
-  tool('remove_breakpoint', 'Remove a breakpoint by ID.', { id: z.string() }, async ({ id }) => ({ removed: debugOps.removeBreakpoint(id) }));
-
-  tool('clear_all_breakpoints', 'Remove all breakpoints.', {}, async () => {
-    debugOps.clearAllBreakpoints();
-    return { ok: true };
-  });
-
-  tool(
-    'toggle_breakpoint',
-    'Toggle a source breakpoint at the given file/line (1-based).',
-    { file: z.string(), line: z.number().int().min(1) },
-    async ({ file, line }) => debugOps.toggleBreakpoint(file, line)
-  );
-
-  // ---------- Tasks ----------
-  tool('list_tasks', 'List all tasks visible to VS Code (workspace + extensions).', {}, async () => listTasks());
-
-  tool(
-    'run_task',
-    'Run a VS Code task by name. Provide source to disambiguate if multiple tasks share a name (e.g. "Workspace", "npm").',
-    { name: z.string(), source: z.string().optional() },
-    async ({ name, source }) => runTask(name, source)
-  );
-
-  tool('list_running_tasks', 'List currently executing tasks.', {}, async () => listRunningTasks());
-
-  tool(
-    'stop_task',
-    'Terminate running task(s) by name (optionally filtered by source).',
-    { name: z.string(), source: z.string().optional() },
-    async ({ name, source }) => stopTask(name, source)
-  );
-
-  // ---------- Terminals ----------
-  tool('list_terminals', 'List terminals being captured via shell integration.', {}, async () => capture.listTerminals());
-
-  tool(
-    'read_terminal',
-    'Read captured output from a terminal by id or name. Output is captured via shell integration, so each command produces a "$ command (exit N)" header followed by its output.',
-    { idOrName: z.string(), tail: z.number().int().min(1).max(10000).optional() },
-    async ({ idOrName, tail }) => {
-      const r = capture.readTerminal(idOrName, tail);
-      if (!r) throw new Error(`No captured terminal found for "${idOrName}"`);
-      return r;
-    }
-  );
-
-  tool(
-    'clear_terminal_buffer',
-    'Clear the captured buffer for a terminal (does not affect the terminal itself).',
-    { idOrName: z.string() },
-    async ({ idOrName }) => ({ cleared: capture.clearTerminal(idOrName) })
-  );
-
-  tool(
-    'run_in_terminal',
-    'Send a command to a terminal. If no terminal name is given, a new one is created. Use read_terminal afterwards to read output.',
-    {
-      command: z.string(),
-      terminalName: z.string().optional(),
-      createIfMissing: z.boolean().optional()
-    },
-    async ({ command, terminalName, createIfMissing }) => {
-      let terminal: vscode.Terminal | undefined;
-      if (terminalName) {
-        terminal = vscode.window.terminals.find((t) => t.name === terminalName);
-        if (!terminal && (createIfMissing ?? true)) {
-          terminal = vscode.window.createTerminal(terminalName);
-        }
-      } else {
-        terminal = vscode.window.activeTerminal ?? vscode.window.createTerminal('MCP');
+    'bind_workspace',
+    'Bind this MCP chat session to a specific VS Code workspace by id (from list_workspaces). All subsequent tool calls in this session will be routed to that workspace. If you never call this, calls go to the leader window\'s workspace by default. Call this once at the start of a multi-window session, or any time the user asks you to switch windows.',
+    { workspaceId: z.string() },
+    ({ workspaceId }: { workspaceId: string }) => {
+      const workspaces = env.listWorkspaces();
+      if (!workspaces.some((w) => w.id === workspaceId)) {
+        throw new Error(`Unknown workspace id: ${workspaceId}. Run list_workspaces to see available ids.`);
       }
-      if (!terminal) throw new Error(`Terminal "${terminalName}" not found.`);
-      terminal.show(true);
-      terminal.sendText(command, true);
-      return { terminal: terminal.name };
+      const sid = sessionId();
+      if (!sid) throw new Error('No MCP session id available; cannot bind.');
+      sessionWorkspace.set(sid, workspaceId);
+      const match = workspaces.find((w) => w.id === workspaceId)!;
+      return { bound: true, workspace: match };
     }
   );
 
-  // ---------- Debug console ----------
-  tool(
-    'read_debug_console',
-    'Read captured output from the debug console (any active or recent debug session).',
-    { tail: z.number().int().min(1).max(10000).optional() },
-    async ({ tail }) => ({ lines: capture.readDebugConsole(tail) })
-  );
+  // ---------- Forwarded tools ----------
+  // Launch / sessions
+  forwarded('list_launch_configurations', 'List debug configurations defined in launch.json across workspace folders.', {});
+  forwarded('start_debugging', 'Start a debug session by launch.json configuration name. Omit name to use the workspace default.', {
+    name: z.string().optional().describe('Configuration name from launch.json'),
+    workspaceFolder: z.string().optional().describe('Workspace folder name (optional)')
+  });
+  forwarded('stop_debugging', 'Stop the active debug session.', {});
+  forwarded('continue_execution', 'Continue execution in the active debug session.', { threadId: z.number().int().optional() });
+  forwarded('pause_execution', 'Pause execution in the active debug session.', { threadId: z.number().int().optional() });
+  forwarded('step_over', 'Step over the current statement.', { threadId: z.number().int().optional() });
+  forwarded('step_in', 'Step into the next function call.', { threadId: z.number().int().optional() });
+  forwarded('step_out', 'Step out of the current function.', { threadId: z.number().int().optional() });
 
-  tool('clear_debug_console_buffer', 'Clear the captured debug console buffer.', {}, async () => {
-    capture.clearDebugConsole();
-    return { ok: true };
+  // State inspection
+  forwarded('get_threads', 'List threads in the active debug session.', {});
+  forwarded('get_stack_trace', 'Get the stack trace for a thread (defaults to first thread).', {
+    threadId: z.number().int().optional(),
+    levels: z.number().int().min(1).max(200).optional()
+  });
+  forwarded('get_scopes', 'Get scopes for a stack frame.', { frameId: z.number().int() });
+  forwarded('get_variables', 'Get variables for a given variablesReference.', { variablesReference: z.number().int() });
+  forwarded('evaluate_expression', 'Evaluate an expression in the active debug session.', {
+    expression: z.string(),
+    frameId: z.number().int().optional(),
+    context: z.enum(['watch', 'repl', 'hover']).optional()
   });
 
-  tool(
-    'eval_in_debug_console',
-    'Evaluate an expression in the debug console (REPL context) of the active session.',
-    { expression: z.string(), frameId: z.number().int().optional() },
-    async ({ expression, frameId }) => debugOps.evaluate(expression, frameId, 'repl')
-  );
+  // Breakpoints
+  forwarded('get_all_breakpoints', 'List all breakpoints.', {});
+  forwarded('get_breakpoint', 'Get a breakpoint by ID.', { id: z.string() });
+  forwarded('set_breakpoint', 'Add a source breakpoint at file/line. Line is 1-based.', {
+    file: z.string(),
+    line: z.number().int().min(1),
+    condition: z.string().optional(),
+    hitCondition: z.string().optional(),
+    logMessage: z.string().optional()
+  });
+  forwarded('remove_breakpoint', 'Remove a breakpoint by ID.', { id: z.string() });
+  forwarded('clear_all_breakpoints', 'Remove all breakpoints.', {});
+  forwarded('toggle_breakpoint', 'Toggle a source breakpoint at the given file/line (1-based).', {
+    file: z.string(),
+    line: z.number().int().min(1)
+  });
+
+  // Tasks
+  forwarded('list_tasks', 'List all tasks visible to VS Code (workspace + extensions).', {});
+  forwarded('run_task', 'Run a VS Code task by name. Provide source to disambiguate if multiple tasks share a name.', {
+    name: z.string(),
+    source: z.string().optional()
+  });
+  forwarded('list_running_tasks', 'List currently executing tasks.', {});
+  forwarded('stop_task', 'Terminate running task(s) by name (optionally filtered by source).', {
+    name: z.string(),
+    source: z.string().optional()
+  });
+
+  // Terminals
+  forwarded('list_terminals', 'List terminals being captured via shell integration.', {});
+  forwarded('read_terminal', 'Read captured output from a terminal by id or name.', {
+    idOrName: z.string(),
+    tail: z.number().int().min(1).max(10000).optional()
+  });
+  forwarded('clear_terminal_buffer', 'Clear the captured buffer for a terminal.', { idOrName: z.string() });
+  forwarded('run_in_terminal', 'Send a command to a terminal.', {
+    command: z.string(),
+    terminalName: z.string().optional(),
+    createIfMissing: z.boolean().optional()
+  });
+
+  // Debug console
+  forwarded('read_debug_console', 'Read captured output from the debug console.', {
+    tail: z.number().int().min(1).max(10000).optional()
+  });
+  forwarded('clear_debug_console_buffer', 'Clear the captured debug console buffer.', {});
+  forwarded('eval_in_debug_console', 'Evaluate an expression in the debug console (REPL).', {
+    expression: z.string(),
+    frameId: z.number().int().optional()
+  });
 
   return server;
 }
@@ -252,7 +196,7 @@ export interface RunningServer {
   stop(): Promise<void>;
 }
 
-export async function startMcpServer(capture: CaptureManager): Promise<RunningServer> {
+export async function startMcpServer(env: MCPServerEnv): Promise<RunningServer> {
   const cfg = vscode.workspace.getConfiguration('vscodeDebugMcp');
   const port = cfg.get<number>('port', 6736);
   const host = cfg.get<string>('host', '127.0.0.1');
@@ -261,6 +205,8 @@ export async function startMcpServer(capture: CaptureManager): Promise<RunningSe
   app.use(express.json({ limit: '4mb' }));
 
   const transports = new Map<string, StreamableHTTPServerTransport>();
+  // Session-id (string) -> bound workspace id (string).
+  const sessionWorkspace = new Map<string, string>();
 
   app.post('/mcp', async (req: Request, res: Response) => {
     try {
@@ -270,17 +216,21 @@ export async function startMcpServer(capture: CaptureManager): Promise<RunningSe
       if (sessionId && transports.has(sessionId)) {
         transport = transports.get(sessionId);
       } else if (!sessionId && isInitializeRequest(req.body)) {
-        transport = new StreamableHTTPServerTransport({
+        const newTransport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
-            if (transport) transports.set(id, transport);
+            transports.set(id, newTransport);
           }
         });
-        transport.onclose = () => {
-          if (transport?.sessionId) transports.delete(transport.sessionId);
+        newTransport.onclose = () => {
+          if (newTransport.sessionId) {
+            transports.delete(newTransport.sessionId);
+            sessionWorkspace.delete(newTransport.sessionId);
+          }
         };
-        const mcp = buildMcpServer(capture);
-        await mcp.connect(transport);
+        const mcp = buildMcpServer(env, sessionWorkspace, () => newTransport.sessionId);
+        await mcp.connect(newTransport);
+        transport = newTransport;
       } else {
         res.status(400).json({
           jsonrpc: '2.0',
@@ -344,6 +294,7 @@ export async function startMcpServer(capture: CaptureManager): Promise<RunningSe
         }
       }
       transports.clear();
+      sessionWorkspace.clear();
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     }
   };

@@ -78,7 +78,29 @@ claude mcp add --transport http vscode-debug http://127.0.0.1:6736/mcp
 
 Streamable HTTP at `http://127.0.0.1:6736/mcp` by default. Port, host, and auto-start are configurable under **VS Code Debug MCP** settings.
 
+### Multi-window
+
+There is one MCP server per machine, not per window. Each VS Code window with the extension installed automatically negotiates a role:
+
+- **Leader** — the first window to start owns the HTTP server on the configured port.
+- **Followers** — subsequent windows register with the leader over a local Unix socket. Their workspace is reachable through the leader's MCP endpoint.
+
+The status bar shows the role: `MCP :6736 (leader)` or `MCP (follower)`.
+
+When an AI talks to the leader's MCP endpoint, it can:
+
+1. Call `list_workspaces` to see all windows.
+2. Call `bind_workspace(workspaceId)` to lock subsequent calls in that chat session to a specific window.
+
+Tools that don't have a binding default to the leader's workspace. The bundled debug-mcp usage skill teaches this flow.
+
+If the leader window closes, followers race to promote themselves — first one to grab the port becomes the new leader; the others re-register.
+
 ## Tools exposed (MCP names; Copilot uses `debugMcp_` prefix)
+
+### Multi-window
+- `list_workspaces`
+- `bind_workspace(workspaceId)`
 
 ### Launch configurations & sessions
 - `list_launch_configurations`
