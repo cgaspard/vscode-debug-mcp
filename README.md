@@ -80,21 +80,23 @@ Streamable HTTP at `http://127.0.0.1:6736/mcp` by default. Port, host, and auto-
 
 ### Multi-window
 
-There is one MCP server per machine, not per window. Each VS Code window with the extension installed automatically negotiates a role:
+There is **one MCP server per machine**, not per window. Each VS Code window with the extension installed automatically negotiates a role:
 
-- **Leader** — the first window to start owns the HTTP server on the configured port.
-- **Followers** — subsequent windows register with the leader over a local Unix socket. Their workspace is reachable through the leader's MCP endpoint.
+- **Leader** — the first window to start owns the HTTP server on the configured port. It also opens a local Unix socket for follower registration and exposes `GET /cluster` so other windows can discover it.
+- **Followers** — subsequent windows hit `EADDRINUSE` when trying to bind the port, then GET `/cluster` on it. If the responder identifies as a Debug MCP leader, they connect to its Unix socket and register their workspace. Tool calls targeted at their workspace are forwarded over IPC.
 
 The status bar shows the role: `MCP :6736 (leader)` or `MCP (follower)`.
 
+There's **no lockfile**. Discovery is purely runtime — the leader's HTTP `/cluster` endpoint is the single source of truth. If the leader crashes hard, its port frees and the next candidate window naturally becomes the new leader on its next `startServer` call. No stale files to clean up.
+
 When an AI talks to the leader's MCP endpoint, it can:
 
-1. Call `list_workspaces` to see all windows.
+1. Call `list_workspaces` to see all windows registered in the cluster.
 2. Call `bind_workspace(workspaceId)` to lock subsequent calls in that chat session to a specific window.
 
-Tools that don't have a binding default to the leader's workspace. The bundled debug-mcp usage skill teaches this flow.
+Tools without a binding default to the leader's workspace. The bundled debug-mcp usage skill teaches the AI this flow.
 
-If the leader window closes, followers race to promote themselves — first one to grab the port becomes the new leader; the others re-register.
+If the configured port is held by something **other** than a Debug MCP leader (e.g. a different app already grabbed 6736), startup fails with a clear "port held by another process" message instead of a raw `EADDRINUSE`. Change `vscodeDebugMcp.port` in settings to work around it.
 
 ## Tools exposed (MCP names; Copilot uses `debugMcp_` prefix)
 
