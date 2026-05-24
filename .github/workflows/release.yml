@@ -65,12 +65,17 @@ jobs:
       - name: Package .vsix
         run: npx vsce package --out "vscode-debug-mcp-${{ steps.ver.outputs.version }}.vsix"
 
+      - name: Create stable versionless mirror
+        run: cp "vscode-debug-mcp-${{ steps.ver.outputs.version }}.vsix" vscode-debug-mcp.vsix
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: ${{ steps.ver.outputs.tag }}
           body_path: release-body.md
-          files: vscode-debug-mcp-${{ steps.ver.outputs.version }}.vsix
+          files: |
+            vscode-debug-mcp-${{ steps.ver.outputs.version }}.vsix
+            vscode-debug-mcp.vsix
           draft: false
           prerelease: ${{ contains(steps.ver.outputs.version, '-') }}

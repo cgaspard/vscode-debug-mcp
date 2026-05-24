@@ -20,14 +20,23 @@ Two surfaces in one extension:
 
 ### From GitHub release (no marketplace needed)
 
-1. Download the latest `.vsix` from the [Releases page](https://github.com/cgaspard/vscode-debug-mcp/releases/latest).
-2. Install it:
-   ```bash
-   code --install-extension vscode-debug-mcp-<version>.vsix
-   ```
-   Or in VS Code: **Extensions view → … menu → Install from VSIX…**
+One-liner (always installs the latest release):
 
-The extension checks for new releases on GitHub every few hours and offers to download + install the new `.vsix` for you. You can also run **Cmd/Ctrl+Shift+P → Debug MCP: Check for Updates** at any time.
+```bash
+# macOS / Linux
+curl -L https://github.com/cgaspard/vscode-debug-mcp/releases/latest/download/vscode-debug-mcp.vsix -o /tmp/vscode-debug-mcp.vsix && code --install-extension /tmp/vscode-debug-mcp.vsix
+```
+
+```powershell
+# Windows PowerShell
+Invoke-WebRequest https://github.com/cgaspard/vscode-debug-mcp/releases/latest/download/vscode-debug-mcp.vsix -OutFile $env:TEMP\vscode-debug-mcp.vsix; code --install-extension $env:TEMP\vscode-debug-mcp.vsix
+```
+
+The URL ends in `vscode-debug-mcp.vsix` (no version) so it stays valid across releases.
+
+Or download from the [Releases page](https://github.com/cgaspard/vscode-debug-mcp/releases/latest) and use **Extensions view → … menu → Install from VSIX…**
+
+After the first install the extension auto-checks GitHub every 6 hours and offers to download and install new versions in-product. You can also run **Cmd/Ctrl+Shift+P → Debug MCP: Check for Updates** at any time.
 
 ### From source (development)
 
