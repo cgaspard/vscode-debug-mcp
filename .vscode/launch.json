@@ -23,6 +23,18 @@
       "preLaunchTask": "npm: compile"
     },
     {
+      "name": "Run Extension + Sample Workspace 2",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/sample-workspace-2"
+      ],
+      "outFiles": ["${workspaceFolder}/out/**/*.js"],
+      "preLaunchTask": "npm: compile"
+    },
+    {
       "name": "Run Extension (Watch)",
       "type": "extensionHost",
       "request": "launch",
@@ -33,6 +45,17 @@
       ],
       "outFiles": ["${workspaceFolder}/out/**/*.js"],
       "preLaunchTask": "npm: watch"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Run Extension + Both Sample Workspaces",
+      "configurations": [
+        "Run Extension + Sample Workspace",
+        "Run Extension + Sample Workspace 2"
+      ],
+      "stopAll": true,
+      "preLaunchTask": "npm: compile"
     }
   ]
 }

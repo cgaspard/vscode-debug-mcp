@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Sample Server",
+      "program": "${workspaceFolder}/server.js",
+      "console": "integratedTerminal"
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Launch Sample Server (port 7200)",
+      "program": "${workspaceFolder}/server.js",
+      "console": "integratedTerminal",
+      "env": { "PORT": "7200" }
+    }
+  ]
+}
