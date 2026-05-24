@@ -89,6 +89,16 @@ claude mcp add --transport http vscode-debug http://127.0.0.1:6736/mcp
 claude mcp add --scope user --transport http vscode-debug http://127.0.0.1:6736/mcp
 ```
 
+## The most common workflow: user-started debug sessions
+
+Most debugging conversations don't start with "AI, launch this for me" — they start with the user hitting **F5**, running into a breakpoint, then asking the AI a question. The extension listens to **every** debug session via VS Code's `DebugAdapterTracker` API, including ones the user starts themselves. The AI can:
+
+1. Call `list_debug_sessions` to see what's currently running or recently paused.
+2. Call `get_last_stopped_event` to read the file, line, frame, and stack trace from the most recent pause — *preserved even after the user continues execution*.
+3. Inspect threads / scopes / variables on a still-paused session, or set new breakpoints on a running one and let it hit.
+
+The bundled `debug-mcp` skill teaches the AI to do this check first before considering whether to start a new session.
+
 ## Architecture
 
 There is **one MCP server per machine**, not per VS Code window. The first window to start binds the HTTP port and becomes the **leader**; subsequent windows become **followers** that join the leader over a local Unix-domain socket and contribute their own workspace to the cluster.
@@ -167,6 +177,10 @@ Streamable HTTP at `http://127.0.0.1:6736/mcp` by default. Port, host, and auto-
 If the configured port is held by something **other** than a Debug MCP leader (e.g. a different app already grabbed 6736), startup fails with a clear "port held by another process" message instead of a raw `EADDRINUSE`. Change `vscodeDebugMcp.port` in settings to work around it.
 
 ## Tools exposed (MCP names; Copilot uses `debugMcp_` prefix)
+
+### Sessions (works for **user-started** sessions too!)
+- `list_debug_sessions` — every active or recently terminated debug session, with status (`running`/`paused`/`terminated`) and a snapshot of the most recent stopped event when present. **The AI should call this first** when the user mentions runtime behavior — they may already be paused at a breakpoint.
+- `get_last_stopped_event(sessionId?, levels?)` — snapshot of the most recent pause: `{ reason, threadId, frame, stackTrace }`. Survives the user continuing execution (snapshot is captured at pause time), so you can still read where they were stopped even after they resumed.
 
 ### Multi-window
 - `list_workspaces`

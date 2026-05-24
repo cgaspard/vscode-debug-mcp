@@ -7,11 +7,14 @@ import {
   getConfigState,
   claudeCodeInstalled,
   uninstallClaudeCodeSupport,
-  deactivateCleanup
+  deactivateCleanup,
+  refreshSkillIfInstalled
 } from './firstRun';
 import { registerLmTools } from './lmTools';
 import { checkForUpdate } from './updater';
 import { buildLocalToolHandlers, type Tool } from './toolHandlers';
+import { SessionRegistry } from './sessionRegistry';
+import { setSessionRegistry } from './debugOps';
 import {
   Leader,
   Follower,
@@ -21,6 +24,7 @@ import {
 } from './cluster';
 
 let capture: CaptureManager | undefined;
+let sessionRegistry: SessionRegistry | undefined;
 let server: RunningServer | undefined;
 let statusBar: vscode.StatusBarItem | undefined;
 let output: vscode.OutputChannel | undefined;
@@ -451,6 +455,15 @@ export async function activate(context: vscode.ExtensionContext) {
     );
   }
 
+  // Track every debug session — including ones the user starts via F5
+  // without going through the AI. The registry feeds list_debug_sessions
+  // and get_last_stopped_event.
+  if (!sessionRegistry) {
+    sessionRegistry = new SessionRegistry();
+    setSessionRegistry(sessionRegistry);
+    context.subscriptions.push(sessionRegistry);
+  }
+
   // Register Language Model tools so Copilot Chat (agent mode) and other
   // vscode.lm consumers can call our handlers without going through MCP.
   try {
@@ -466,6 +479,18 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Background: ask GitHub if there's a newer release.
   void checkForUpdate(context, { silent: true });
+
+  // Background: if the user has previously installed the skill, keep
+  // it in sync with whatever ships in this version of the extension.
+  void refreshSkillIfInstalled(context.extensionPath)
+    .then((result) => {
+      if (result === 'updated') {
+        log('Refreshed user-scope debug-mcp skill from bundled copy.');
+      }
+    })
+    .catch((err) => {
+      log(`Skill refresh failed: ${err instanceof Error ? err.message : err}`);
+    });
 }
 
 export async function deactivate() {

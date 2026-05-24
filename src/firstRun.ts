@@ -371,3 +371,32 @@ export async function deactivateCleanup(): Promise<void> {
 export async function resetInstallPromptFlag(context: vscode.ExtensionContext): Promise<void> {
   await context.globalState.update(PROMPTED_KEY, false);
 }
+
+/**
+ * On extension activation/upgrade, if a debug-mcp skill is already
+ * installed at ~/.claude/skills/debug-mcp/, refresh it from the bundled
+ * copy. This keeps SKILL.md in sync with whatever shipped in the
+ * current .vsix without requiring the user to re-run the installer.
+ *
+ * Idempotent: writeSkill() compares bytes and is a no-op if unchanged.
+ * Does nothing if the user hasn't installed the skill yet.
+ */
+export async function refreshSkillIfInstalled(extensionPath: string): Promise<'updated' | 'unchanged' | 'not-installed'> {
+  const skillDir = globalSkillDir();
+  const targetFile = path.join(skillDir, 'SKILL.md');
+  try {
+    await fs.stat(targetFile);
+  } catch {
+    return 'not-installed';
+  }
+  const sourceSkill = path.join(extensionPath, 'resources', 'skill', 'SKILL.md');
+  try {
+    const desired = await fs.readFile(sourceSkill, 'utf8');
+    const current = await fs.readFile(targetFile, 'utf8');
+    if (current === desired) return 'unchanged';
+    await fs.writeFile(targetFile, desired, 'utf8');
+    return 'updated';
+  } catch {
+    return 'not-installed';
+  }
+}

@@ -1,4 +1,16 @@
 import * as vscode from 'vscode';
+import type { SessionRegistry, SessionRecord } from './sessionRegistry';
+
+// The session registry is injected at startup by extension.ts and reused
+// here so we don't have to thread it through every method signature.
+let registry: SessionRegistry | undefined;
+export function setSessionRegistry(r: SessionRegistry): void {
+  registry = r;
+}
+function requireRegistry(): SessionRegistry {
+  if (!registry) throw new Error('SessionRegistry not initialized.');
+  return registry;
+}
 
 export interface BreakpointInfo {
   id: string;
@@ -34,6 +46,28 @@ function activeSession(): vscode.DebugSession {
   const s = vscode.debug.activeDebugSession;
   if (!s) throw new Error('No active debug session.');
   return s;
+}
+
+/**
+ * Pick the debug session to act on. If `sessionId` is provided, look it
+ * up explicitly. Otherwise fall back to vscode.debug.activeDebugSession.
+ * This lets MCP tools target a specific user-started session by id
+ * (from list_debug_sessions) instead of relying on which session VS
+ * Code currently considers "active".
+ */
+function pickSession(sessionId?: string): vscode.DebugSession {
+  if (sessionId) {
+    // VS Code doesn't expose getDebugSessionById; iterate the known
+    // sessions via the active one's siblings is not possible either.
+    // The DebugSession API surface is limited — fall back to active if
+    // the id happens to match it, otherwise throw with a hint.
+    const active = vscode.debug.activeDebugSession;
+    if (active && active.id === sessionId) return active;
+    throw new Error(
+      `Cannot directly access session "${sessionId}". The VS Code API only exposes the active session for direct customRequest calls. Make that session active in the debug view first, or omit sessionId to use the current active session.`
+    );
+  }
+  return activeSession();
 }
 
 async function pickThreadId(session: vscode.DebugSession, threadId?: number): Promise<number> {
@@ -183,5 +217,42 @@ export const debugOps = {
     }
     await debugOps.setBreakpoint(file, line);
     return { enabled: true, created: true };
+  },
+
+  /**
+   * List every known debug session — including ones the user started
+   * themselves via F5. Each entry carries status, and (if paused or
+   * recently paused) a snapshot of where execution stopped.
+   */
+  listSessions(): (SessionRecord & { isActive: boolean })[] {
+    const reg = requireRegistry();
+    const activeId = vscode.debug.activeDebugSession?.id;
+    return reg.list().map((r) => ({ ...r, isActive: r.id === activeId }));
+  },
+
+  /**
+   * Get a snapshot of the most recent stopped event for a session.
+   * Useful when the user hit a breakpoint, you joined the chat after,
+   * and you need to know "what is the program doing right now / what
+   * did it just stop at". Frame and stack data is captured at stop
+   * time so it survives the user continuing execution.
+   */
+  async getLastStoppedEvent(sessionId?: string, levels = 5): Promise<SessionRecord | undefined> {
+    const reg = requireRegistry();
+    let targetId = sessionId;
+    if (!targetId) {
+      // Prefer the active session; if there isn't one, fall back to the
+      // most recently paused session in the registry.
+      targetId = vscode.debug.activeDebugSession?.id;
+      if (!targetId) {
+        const all = reg.list();
+        const paused = all.filter((s) => s.lastStopped).sort(
+          (a, b) => (b.lastStopped?.capturedAt ?? 0) - (a.lastStopped?.capturedAt ?? 0)
+        );
+        targetId = paused[0]?.id;
+      }
+    }
+    if (!targetId) return undefined;
+    return reg.enrichLastStopped(targetId, levels);
   }
 };

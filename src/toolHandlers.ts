@@ -89,6 +89,11 @@ export function buildLocalToolHandlers(capture: CaptureManager): Record<string, 
       return { terminal: terminal.name };
     },
 
+    // Sessions (user-started OR AI-started)
+    list_debug_sessions: () => debugOps.listSessions(),
+    get_last_stopped_event: ({ sessionId, levels }: { sessionId?: string; levels?: number } = {}) =>
+      debugOps.getLastStoppedEvent(sessionId, levels ?? 5),
+
     // Debug console
     read_debug_console: ({ tail }) => ({ lines: capture.readDebugConsole(tail) }),
     clear_debug_console_buffer: () => {

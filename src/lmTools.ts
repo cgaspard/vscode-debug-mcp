@@ -61,6 +61,23 @@ function defineTool<I>(def: ToolDef<I>): vscode.Disposable {
 export function registerLmTools(context: vscode.ExtensionContext, capture: CaptureManager): void {
   const subs: vscode.Disposable[] = [];
 
+  // ---------- Sessions (covers user-started AND AI-started) ----------
+  subs.push(
+    defineTool<{}>({
+      name: 'debugMcp_list_debug_sessions',
+      handler: () => debugOps.listSessions(),
+      invocationMessage: () => 'Listing debug sessions'
+    })
+  );
+
+  subs.push(
+    defineTool<{ sessionId?: string; levels?: number }>({
+      name: 'debugMcp_get_last_stopped_event',
+      handler: ({ sessionId, levels }) => debugOps.getLastStoppedEvent(sessionId, levels ?? 5),
+      invocationMessage: () => 'Reading last stopped event'
+    })
+  );
+
   // ---------- Launch / sessions ----------
   subs.push(
     defineTool<{}>({

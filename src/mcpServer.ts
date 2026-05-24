@@ -109,6 +109,21 @@ function buildMcpServer(env: MCPServerEnv, sessionWorkspace: Map<string, string>
   );
 
   // ---------- Forwarded tools ----------
+  // Sessions (covers BOTH user-started and AI-started sessions)
+  forwarded(
+    'list_debug_sessions',
+    'List every active or recently-terminated debug session in the bound workspace — including sessions the user started themselves via F5. Each entry has { id, name, type, status: running|paused|terminated, isActive, startedAt, lastStopped? }. lastStopped, when present, includes the frame and stack-trace snapshot from the most recent pause (preserved even after the user continues execution). Call this FIRST when a user mentions runtime behavior, errors, or debugging — they may already have a session paused at a breakpoint you should look at instead of starting your own.',
+    {}
+  );
+  forwarded(
+    'get_last_stopped_event',
+    'Get a detailed snapshot of the most recent stopped event for a debug session (defaults to the active session, or the most recently paused one if no active session). Returns { reason, threadId, frame: { name, file, line, column }, stackTrace[] }. Survives the user continuing execution — even if the session is no longer paused, you can still read where it last stopped. Use this when joining a chat where the user already has (or had) a debug session in progress.',
+    {
+      sessionId: z.string().optional().describe('Session id from list_debug_sessions. Omit to use the active or most-recently-paused session.'),
+      levels: z.number().int().min(1).max(50).optional().describe('Max stack frames to include (default 5).')
+    }
+  );
+
   // Launch / sessions
   forwarded('list_launch_configurations', 'List debug configurations defined in launch.json across workspace folders.', {});
   forwarded('start_debugging', 'Start a debug session by launch.json configuration name. Omit name to use the workspace default.', {

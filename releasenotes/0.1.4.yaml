@@ -1,0 +1,17 @@
+version: 0.1.4
+date: 2026-05-24
+highlights:
+  - Read state from debug sessions the user started — not just ones the AI launched. When the user hits F5 and runs into a breakpoint, the AI can now see it via list_debug_sessions / get_last_stopped_event.
+  - The most-recent stopped event (file, line, frame, stack trace) is captured at pause time and remains queryable even after the user continues execution.
+  - Skill rewritten with "check for an existing user-started session FIRST" as rule #1 — the most common workflow, finally treated as primary.
+  - Installed skill auto-refreshes on extension upgrade so the user gets new guidance without re-running the installer.
+added:
+  - SessionRegistry that tracks every debug session via DebugAdapterTracker — start, run, pause, continue, terminate. Records the latest stopped event per session with thread, reason, frame, and a 10-level stack snapshot.
+  - list_debug_sessions tool — returns one entry per active or recently terminated session with { id, name, type, status, isActive, startedAt, lastStopped? }. Available via MCP and the Copilot Language Model Tools API.
+  - get_last_stopped_event(sessionId?, levels?) tool — detailed snapshot of the most recent pause. Defaults to the active session, falls back to the most recently paused one. Returns frame + stack trace even if the user has already continued execution.
+  - Skill auto-refresh — on extension activation, if ~/.claude/skills/debug-mcp/SKILL.md exists, it's overwritten with the bundled copy from the new extension version. Idempotent; no-op when contents already match.
+changed:
+  - Skill rewritten end-to-end. Rule #1 is now "list_debug_sessions BEFORE doing anything when the conversation involves runtime behavior." User-paused-at-breakpoint is the lead playbook; AI-started session is secondary.
+  - README adds a "The most common workflow: user-started debug sessions" section above the architecture diagram so the capability is discoverable.
+fixed: []
+removed: []

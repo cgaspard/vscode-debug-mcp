@@ -2,7 +2,7 @@
   "name": "vscode-debug-mcp",
   "displayName": "VS Code Debug MCP",
   "description": "MCP server exposing VS Code debugging, terminals, debug console, launch configurations, and tasks to AI assistants.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "cgaspard",
   "license": "MIT",
   "repository": {
@@ -64,6 +64,30 @@
       }
     ],
     "languageModelTools": [
+      {
+        "name": "debugMcp_list_debug_sessions",
+        "displayName": "List debug sessions",
+        "modelDescription": "List every active or recently-terminated debug session — INCLUDING sessions the user started themselves via F5. Returns id, name, type, status (running/paused/terminated), isActive, and lastStopped snapshot when present. Call this BEFORE assuming you need to start a new session; the user may already have one paused at a breakpoint you should look at instead.",
+        "userDescription": "List active debug sessions",
+        "canBeReferencedInPrompt": true,
+        "toolReferenceName": "debugSessions",
+        "tags": ["debug-mcp"],
+        "inputSchema": { "type": "object", "properties": {} }
+      },
+      {
+        "name": "debugMcp_get_last_stopped_event",
+        "displayName": "Get last stopped event",
+        "modelDescription": "Read the most recent stopped event for a debug session — file, line, thread, reason, and stack-trace snapshot. The snapshot is captured at the moment of the pause, so it remains queryable even after the user continues execution. Use this when joining a chat where the user already has (or had) a debug session in progress, to understand 'where were they paused' without needing the session to still be paused right now.",
+        "userDescription": "Read last stopped event",
+        "tags": ["debug-mcp"],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": { "type": "string", "description": "Session id from list_debug_sessions. Omit to use the active or most-recently-paused session." },
+            "levels": { "type": "number", "minimum": 1, "maximum": 50, "description": "Max stack frames to include (default 5)." }
+          }
+        }
+      },
       {
         "name": "debugMcp_list_launch_configurations",
         "displayName": "List launch configurations",
