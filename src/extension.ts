@@ -8,7 +8,7 @@ import { buildLocalToolHandlers, type Tool } from './toolHandlers';
 import {
   Leader,
   Follower,
-  discoverRole,
+  probeLeaderHttp,
   workspaceIdFor,
   type WorkspaceInfo
 } from './cluster';
@@ -201,31 +201,39 @@ async function startServer() {
   }
   if (!ownWorkspace) ownWorkspace = computeOwnWorkspace();
 
-  // Decide leader vs follower
-  const discovery = await discoverRole();
-  if (discovery.role === 'follower' && discovery.leaderSocketPath) {
-    await becomeFollower(discovery.leaderSocketPath);
-  } else {
-    await becomeLeader();
-  }
+  // Try to become leader first. If the port is in use, probe to see if
+  // another Debug MCP leader is running; if so, follow it.
+  await becomeLeader();
   updateStatusBar();
 }
 
 async function becomeLeader(): Promise<void> {
   if (!ownWorkspace) ownWorkspace = computeOwnWorkspace();
+  // Set up the cluster IPC server first so it's ready before the HTTP
+  // server starts answering /cluster requests.
+  leader = new Leader(ownWorkspace, async (tool, args) => runLocalTool(tool, args));
   try {
-    leader = new Leader(ownWorkspace, async (tool, args) => runLocalTool(tool, args));
     await leader.start();
-    leader.on('workspaces-changed', () => {
-      log(`Cluster workspaces: ${leader!.listWorkspaces().map((w) => w.name).join(', ')}`);
-    });
+  } catch (err) {
+    leader = undefined;
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`Failed to start cluster IPC: ${msg}`);
+    vscode.window.showErrorMessage(`Debug MCP cluster IPC failed: ${msg}`);
+    return;
+  }
 
-    const env: MCPServerEnv = {
-      dispatch: (workspaceId, tool, args) => leader!.dispatch(workspaceId, tool, args) as Promise<unknown>,
-      listWorkspaces: () => leader!.listWorkspaces(),
-      defaultWorkspaceId: () => leader!.getOwnWorkspace().id
-    };
+  leader.on('workspaces-changed', () => {
+    log(`Cluster workspaces: ${leader!.listWorkspaces().map((w) => w.name).join(', ')}`);
+  });
 
+  const env: MCPServerEnv = {
+    dispatch: (workspaceId, tool, args) => leader!.dispatch(workspaceId, tool, args) as Promise<unknown>,
+    listWorkspaces: () => leader!.listWorkspaces(),
+    defaultWorkspaceId: () => leader!.getOwnWorkspace().id,
+    getClusterInfo: () => leader!.getClusterInfo()
+  };
+
+  try {
     server = await startMcpServer(env);
     role = 'leader';
     log(`Leader: MCP server listening at ${server.url}`);
@@ -233,14 +241,34 @@ async function becomeLeader(): Promise<void> {
     if (extensionContext) {
       void offerInstall(extensionContext, server.url);
     }
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.code === 'EADDRINUSE') {
+      // Port is taken — check if it's a fellow Debug MCP leader we can follow.
+      const cfg = vscode.workspace.getConfiguration('vscodeDebugMcp');
+      const port = cfg.get<number>('port', 6736);
+      const host = cfg.get<string>('host', '127.0.0.1');
+      log(`Port ${port} is in use; probing for an existing Debug MCP leader…`);
+      const info = await probeLeaderHttp(host, port);
+      // Clean up our half-built leader either way.
+      await leader.stop().catch(() => {});
+      leader = undefined;
+      if (info) {
+        log(`Found Debug MCP leader (pid ${info.pid}); joining as follower via ${info.socket}`);
+        await becomeFollower(info.socket);
+        return;
+      }
+      // No Debug MCP responder — somebody else holds the port.
+      const msg = `Port ${port} is in use by another process that is not a Debug MCP server. Stop the conflicting process or change vscodeDebugMcp.port in settings.`;
+      log(msg);
+      vscode.window.showErrorMessage(`Debug MCP: ${msg}`);
+      role = 'standalone';
+      return;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     log(`Failed to start as leader: ${msg}`);
     vscode.window.showErrorMessage(`Failed to start Debug MCP: ${msg}`);
-    if (leader) {
-      await leader.stop().catch(() => {});
-      leader = undefined;
-    }
+    await leader.stop().catch(() => {});
+    leader = undefined;
   }
 }
 

@@ -1,8 +1,8 @@
-import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import * as net from 'net';
+import * as http from 'http';
 import * as crypto from 'crypto';
 import { EventEmitter } from 'events';
 
@@ -14,9 +14,12 @@ import { EventEmitter } from 'events';
 // registry of workspaces (one per follower + its own) and forwards tool
 // calls to the right follower based on MCP session -> workspace binding.
 //
-// Discovery is via a lockfile on disk that records the leader's PID and
-// IPC socket path. New windows read it; if the leader is alive, they
-// follow; otherwise they take over.
+// Discovery is by **port probing** — no lockfile. New windows try to bind
+// the configured port; on success they become the leader, on EADDRINUSE
+// they ask the existing leader (via HTTP GET /cluster) for its IPC
+// socket path and connect as a follower. The leader's HTTP server is the
+// single source of truth — when it dies, the port frees and the next
+// candidate naturally takes over.
 
 export interface WorkspaceInfo {
   id: string;          // sha256(path).slice(0,12)
@@ -24,9 +27,16 @@ export interface WorkspaceInfo {
   path: string;        // absolute workspace folder path
 }
 
+export interface ClusterInfo {
+  product: 'vscode-debug-mcp';
+  pid: number;
+  socket: string;       // absolute IPC socket path
+  startedAt: number;
+}
+
 export interface ClusterMessage {
   id: string;          // request id (UUID)
-  type: 'request' | 'response' | 'register' | 'registered' | 'unregister' | 'ping' | 'pong' | 'workspaces';
+  type: 'request' | 'response' | 'register' | 'registered' | 'unregister' | 'ping' | 'pong';
   tool?: string;
   args?: any;
   result?: any;
@@ -34,73 +44,46 @@ export interface ClusterMessage {
   workspace?: WorkspaceInfo;
 }
 
-const LOCK_FILE = path.join(os.tmpdir(), 'vscode-debug-mcp.lock');
 const SOCK_PREFIX = path.join(os.tmpdir(), 'vscode-debug-mcp-');
 
 export function workspaceIdFor(absolutePath: string): string {
   return crypto.createHash('sha256').update(absolutePath).digest('hex').slice(0, 12);
 }
 
-interface LockData {
-  pid: number;
-  socket: string;
-  startedAt: number;
-}
-
-function readLock(): LockData | undefined {
-  try {
-    const raw = fs.readFileSync(LOCK_FILE, 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-}
-
-function writeLock(data: LockData): void {
-  fs.writeFileSync(LOCK_FILE, JSON.stringify(data, null, 2));
-}
-
-function removeLock(): void {
-  try {
-    fs.unlinkSync(LOCK_FILE);
-  } catch {
-    /* ignore */
-  }
-}
-
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err: any) {
-    return err.code === 'EPERM';
-  }
-}
-
 /**
- * Try to connect to the leader's IPC socket and ping it. Returns the
- * socket on success; undefined if the leader is gone.
+ * Probe `host:port` for a Debug MCP leader. Returns the cluster info if
+ * the responder is our leader, undefined otherwise (no listener, or some
+ * other app on the port).
  */
-async function probeLeader(socketPath: string, timeoutMs = 500): Promise<net.Socket | undefined> {
+export function probeLeaderHttp(host: string, port: number, timeoutMs = 1500): Promise<ClusterInfo | undefined> {
   return new Promise((resolve) => {
-    const sock = net.createConnection(socketPath);
-    const cleanup = () => {
-      sock.removeAllListeners();
-    };
-    const t = setTimeout(() => {
-      cleanup();
-      sock.destroy();
-      resolve(undefined);
-    }, timeoutMs);
-    sock.once('connect', () => {
-      clearTimeout(t);
-      cleanup();
-      resolve(sock);
-    });
-    sock.once('error', () => {
-      clearTimeout(t);
-      cleanup();
-      sock.destroy();
+    const req = http.get(
+      { host, port, path: '/cluster', timeout: timeoutMs },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          return resolve(undefined);
+        }
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => (body += c));
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(body) as ClusterInfo;
+            if (parsed?.product === 'vscode-debug-mcp' && typeof parsed.socket === 'string') {
+              resolve(parsed);
+            } else {
+              resolve(undefined);
+            }
+          } catch {
+            resolve(undefined);
+          }
+        });
+      }
+    );
+    req.on('error', () => resolve(undefined));
+    req.on('timeout', () => {
+      req.destroy();
       resolve(undefined);
     });
   });
@@ -142,6 +125,7 @@ export class Leader extends EventEmitter {
   private pendingByFollower = new Map<string, Map<string, (msg: ClusterMessage) => void>>();
   private ownWorkspace: WorkspaceInfo;
   private socketPath: string;
+  private startedAt = Date.now();
 
   constructor(ownWorkspace: WorkspaceInfo, private localDispatch: ToolDispatch) {
     super();
@@ -151,7 +135,6 @@ export class Leader extends EventEmitter {
   }
 
   async start(): Promise<void> {
-    // Clean any stale socket file at our chosen path.
     try {
       await fsp.unlink(this.socketPath);
     } catch {
@@ -164,7 +147,16 @@ export class Leader extends EventEmitter {
         resolve();
       });
     });
-    writeLock({ pid: process.pid, socket: this.socketPath, startedAt: Date.now() });
+    this.startedAt = Date.now();
+  }
+
+  getClusterInfo(): ClusterInfo {
+    return {
+      product: 'vscode-debug-mcp',
+      pid: process.pid,
+      socket: this.socketPath,
+      startedAt: this.startedAt
+    };
   }
 
   async stop(): Promise<void> {
@@ -177,10 +169,6 @@ export class Leader extends EventEmitter {
     }
     this.followers.clear();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
-    // Only remove the lock if it still points at us (avoid clobbering a
-    // newly-promoted leader).
-    const lock = readLock();
-    if (lock && lock.pid === process.pid) removeLock();
     try {
       await fsp.unlink(this.socketPath);
     } catch {
@@ -247,8 +235,6 @@ export class Leader extends EventEmitter {
     setupLineReader(sock, (msg) => {
       if (msg.type === 'register' && msg.workspace) {
         registered = msg.workspace;
-        // If two windows somehow share the same workspace id, the latest
-        // registration wins.
         this.followers.set(registered.id, { sock, workspace: registered });
         send(sock, { id: msg.id, type: 'registered' });
         this.emit('workspaces-changed');
@@ -316,7 +302,6 @@ export class Follower extends EventEmitter {
       send(this.sock!, { id: regId, type: 'register', workspace: this.ownWorkspace });
     });
 
-    // Heartbeat to detect leader death
     this.heartbeat = setInterval(() => this.ping(), 10_000);
   }
 
@@ -354,32 +339,4 @@ export class Follower extends EventEmitter {
       this.sock = undefined;
     }
   }
-}
-
-// ---------------- Coordinator ----------------
-
-/**
- * Decide whether to act as leader or follower. If a live leader exists,
- * follow it. Otherwise become leader.
- */
-export interface DiscoveryResult {
-  role: 'leader' | 'follower';
-  leaderSocketPath?: string; // only set when role === 'follower'
-}
-
-export async function discoverRole(): Promise<DiscoveryResult> {
-  const lock = readLock();
-  if (lock) {
-    if (lock.pid !== process.pid && pidAlive(lock.pid)) {
-      const probe = await probeLeader(lock.socket);
-      if (probe) {
-        probe.destroy();
-        return { role: 'follower', leaderSocketPath: lock.socket };
-      }
-      // PID alive but socket dead — treat as stale, take over.
-    }
-    // Stale lock; clean up.
-    removeLock();
-  }
-  return { role: 'leader' };
 }

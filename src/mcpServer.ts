@@ -7,7 +7,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
-import type { WorkspaceInfo } from './cluster';
+import type { WorkspaceInfo, ClusterInfo } from './cluster';
 
 function jsonResult(value: unknown) {
   return {
@@ -40,6 +40,8 @@ export interface MCPServerEnv {
   listWorkspaces(): WorkspaceInfo[];
   /** The workspace ID to use when no binding has been made yet. */
   defaultWorkspaceId(): string;
+  /** Info served at GET /cluster so other windows can discover us. */
+  getClusterInfo(): ClusterInfo;
 }
 
 function buildMcpServer(env: MCPServerEnv, sessionWorkspace: Map<string, string>, sessionId: () => string | undefined): McpServer {
@@ -267,6 +269,10 @@ export async function startMcpServer(env: MCPServerEnv): Promise<RunningServer> 
 
   app.get('/', (_req: Request, res: Response) => {
     res.json({ name: 'vscode-debug-mcp', endpoint: '/mcp', transport: 'streamable-http' });
+  });
+
+  app.get('/cluster', (_req: Request, res: Response) => {
+    res.json(env.getClusterInfo());
   });
 
   const httpServer = http.createServer(app);
