@@ -40,7 +40,9 @@ When the extension activates and detects that Claude Code (`anthropic.claude-cod
 
 A second prompt asks whether to also install the **debug-mcp usage skill** — a markdown file Claude Code auto-loads when relevant. The skill teaches Claude when to reach for these tools, how to sequence breakpoints/stack/scope/variables inspection, and which gotchas to watch for. Recommended.
 
-You can re-open the picker any time via the command palette: **Debug MCP: Configure Claude Code…**.
+You can re-open the picker any time:
+
+> **Cmd/Ctrl+Shift+P → Debug MCP: Install Claude Code Support…**
 
 If you'd rather do it manually:
 

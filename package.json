@@ -43,7 +43,8 @@
       },
       {
         "command": "vscodeDebugMcp.configureClaudeCode",
-        "title": "Debug MCP: Configure Claude Code…"
+        "title": "Debug MCP: Install Claude Code Support…",
+        "category": "Debug MCP"
       },
       {
         "command": "vscodeDebugMcp.resetInstallPrompt",
