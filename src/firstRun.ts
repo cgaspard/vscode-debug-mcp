@@ -62,6 +62,28 @@ export function claudeCodeInstalled(): boolean {
   return Boolean(vscode.extensions.getExtension(CLAUDE_CODE_EXT_ID));
 }
 
+export interface ConfigState {
+  workspaceConfigured: boolean;
+  userConfigured: boolean;
+}
+
+async function fileMentionsServer(file: string): Promise<boolean> {
+  const json = await readJsonIfExists(file);
+  if (!json) return false;
+  const servers = (json.mcpServers ?? {}) as Record<string, unknown>;
+  return Boolean(servers[SERVER_KEY]);
+}
+
+export async function getConfigState(): Promise<ConfigState> {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  const userFile = path.join(os.homedir(), '.claude', 'settings.json');
+  const [workspaceConfigured, userConfigured] = await Promise.all([
+    folder ? fileMentionsServer(path.join(folder.uri.fsPath, '.mcp.json')) : Promise.resolve(false),
+    fileMentionsServer(userFile)
+  ]);
+  return { workspaceConfigured, userConfigured };
+}
+
 interface InstallTarget {
   label: string;
   description: string;

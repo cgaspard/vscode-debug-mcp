@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// Generate a 128x128 PNG icon for the extension.
+// Generate a 256x256 PNG icon for the extension.
 // Pure Node, no dependencies. Outputs media/icon.png.
 //
-// Design: dark rounded-square background with a debug-step glyph (a play
-// triangle with a small step "ladder" of dots in front of it), recolored
-// in VS Code's debug-orange so it reads at small sizes in the marketplace
-// and sidebar.
+// Design: a stylized bug (ladybug silhouette) with two antennae that
+// terminate in circuit-style nodes — the "bug" reads as "debugger" and
+// the antenna-nodes evoke being plugged into AI tooling (MCP).
+//
+// Palette: amber bug + warm highlight, dark slate background, soft
+// connection lines.
 
 const fs = require('fs');
 const path = require('path');
@@ -13,9 +15,15 @@ const zlib = require('zlib');
 
 const SIZE = 256;
 const RADIUS = 44;
-const BG = [0x1f, 0x24, 0x2e, 0xff];        // deep slate
-const ACCENT = [0xf9, 0x82, 0x2c, 0xff];    // VS Code debug orange
-const ACCENT_DIM = [0xff, 0xb2, 0x6b, 0xff];
+
+const BG = [0x1a, 0x1f, 0x2a, 0xff];          // deep slate
+const BG_GLOW = [0x26, 0x2d, 0x3d, 0xff];      // subtle radial center
+const BUG = [0xf2, 0x7d, 0x2a, 0xff];          // primary amber
+const BUG_DARK = [0xc2, 0x5a, 0x16, 0xff];     // bug shadow / underside
+const BUG_HILITE = [0xff, 0xb0, 0x5e, 0xff];   // top sheen
+const SPOT = [0x2a, 0x18, 0x09, 0xff];         // ladybug spots
+const WIRE = [0x7b, 0xc3, 0xe8, 0xff];         // cool cyan for circuitry
+const NODE = [0xa8, 0xe0, 0xff, 0xff];         // brighter node
 
 const out = new Uint8Array(SIZE * SIZE * 4);
 
@@ -29,7 +37,6 @@ function setPx(x, y, rgba) {
 }
 
 function blend(dst, src) {
-  // src over dst, both straight rgba
   const sa = src[3] / 255;
   const da = dst[3] / 255;
   const oa = sa + da * (1 - sa);
@@ -60,101 +67,168 @@ function aaPx(x, y, rgba, coverage) {
   out[i + 3] = blended[3];
 }
 
-// Rounded rect background
 function fillRoundedRect(x0, y0, w, h, r, rgba) {
   for (let y = y0; y < y0 + h; y++) {
     for (let x = x0; x < x0 + w; x++) {
-      // Distance from nearest corner
       const cx = x < x0 + r ? x0 + r : x > x0 + w - 1 - r ? x0 + w - 1 - r : x;
       const cy = y < y0 + r ? y0 + r : y > y0 + h - 1 - r ? y0 + h - 1 - r : y;
       const dx = x - cx;
       const dy = y - cy;
       const d = Math.sqrt(dx * dx + dy * dy);
-      // anti-alias edge over 1 px
-      if (d <= r - 0.5) {
-        setPx(x, y, rgba);
-      } else if (d <= r + 0.5) {
-        const cov = r + 0.5 - d;
-        aaPx(x, y, rgba, cov);
-      }
-    }
-  }
-}
-
-// Filled triangle (3 points), simple scanline with edge AA via 2x supersample
-function fillTriangle(p1, p2, p3, rgba) {
-  const ss = 2;
-  const minX = Math.max(0, Math.floor(Math.min(p1[0], p2[0], p3[0])));
-  const maxX = Math.min(SIZE - 1, Math.ceil(Math.max(p1[0], p2[0], p3[0])));
-  const minY = Math.max(0, Math.floor(Math.min(p1[1], p2[1], p3[1])));
-  const maxY = Math.min(SIZE - 1, Math.ceil(Math.max(p1[1], p2[1], p3[1])));
-
-  const sign = (a, b, c) =>
-    (a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1]);
-
-  for (let y = minY; y <= maxY; y++) {
-    for (let x = minX; x <= maxX; x++) {
-      let hits = 0;
-      for (let sy = 0; sy < ss; sy++) {
-        for (let sx = 0; sx < ss; sx++) {
-          const px = x + (sx + 0.5) / ss;
-          const py = y + (sy + 0.5) / ss;
-          const pt = [px, py];
-          const d1 = sign(pt, p1, p2);
-          const d2 = sign(pt, p2, p3);
-          const d3 = sign(pt, p3, p1);
-          const hasNeg = d1 < 0 || d2 < 0 || d3 < 0;
-          const hasPos = d1 > 0 || d2 > 0 || d3 > 0;
-          if (!(hasNeg && hasPos)) hits++;
-        }
-      }
-      if (hits > 0) {
-        aaPx(x, y, rgba, hits / (ss * ss));
-      }
-    }
-  }
-}
-
-// Filled circle with AA
-function fillCircle(cx, cy, r, rgba) {
-  const minX = Math.max(0, Math.floor(cx - r - 1));
-  const maxX = Math.min(SIZE - 1, Math.ceil(cx + r + 1));
-  const minY = Math.max(0, Math.floor(cy - r - 1));
-  const maxY = Math.min(SIZE - 1, Math.ceil(cy + r + 1));
-  for (let y = minY; y <= maxY; y++) {
-    for (let x = minX; x <= maxX; x++) {
-      const d = Math.sqrt((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2);
       if (d <= r - 0.5) setPx(x, y, rgba);
       else if (d <= r + 0.5) aaPx(x, y, rgba, r + 0.5 - d);
     }
   }
 }
 
+// Radial gradient overlay (center to edges)
+function radialGlow(cx, cy, rOuter, rgba) {
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const d = Math.sqrt((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2);
+      if (d >= rOuter) continue;
+      const t = 1 - d / rOuter;
+      aaPx(x, y, rgba, t * t * 0.5);
+    }
+  }
+}
+
+function fillEllipse(cx, cy, rx, ry, rgba, rotateRad = 0) {
+  const cos = Math.cos(rotateRad);
+  const sin = Math.sin(rotateRad);
+  const maxR = Math.max(rx, ry) + 1;
+  const minX = Math.max(0, Math.floor(cx - maxR));
+  const maxX = Math.min(SIZE - 1, Math.ceil(cx + maxR));
+  const minY = Math.max(0, Math.floor(cy - maxR));
+  const maxY = Math.min(SIZE - 1, Math.ceil(cy + maxR));
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const dx = x + 0.5 - cx;
+      const dy = y + 0.5 - cy;
+      const rxv = dx * cos + dy * sin;
+      const ryv = -dx * sin + dy * cos;
+      const v = (rxv / rx) ** 2 + (ryv / ry) ** 2;
+      if (v <= 0.96) setPx(x, y, rgba);
+      else if (v <= 1.04) {
+        const cov = (1.04 - v) / 0.08;
+        aaPx(x, y, rgba, cov);
+      }
+    }
+  }
+}
+
+function fillCircle(cx, cy, r, rgba) {
+  fillEllipse(cx, cy, r, r, rgba);
+}
+
+// Anti-aliased line via supersampling, with rounded caps
+function drawLine(x0, y0, x1, y1, thickness, rgba) {
+  const minX = Math.max(0, Math.floor(Math.min(x0, x1) - thickness - 1));
+  const maxX = Math.min(SIZE - 1, Math.ceil(Math.max(x0, x1) + thickness + 1));
+  const minY = Math.max(0, Math.floor(Math.min(y0, y1) - thickness - 1));
+  const maxY = Math.min(SIZE - 1, Math.ceil(Math.max(y0, y1) + thickness + 1));
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const lenSq = dx * dx + dy * dy;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const px = x + 0.5;
+      const py = y + 0.5;
+      let t = lenSq === 0 ? 0 : ((px - x0) * dx + (py - y0) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const cx = x0 + t * dx;
+      const cy = y0 + t * dy;
+      const d = Math.sqrt((px - cx) ** 2 + (py - cy) ** 2);
+      const half = thickness / 2;
+      if (d <= half - 0.5) setPx(x, y, rgba);
+      else if (d <= half + 0.5) aaPx(x, y, rgba, half + 0.5 - d);
+    }
+  }
+}
+
+// Draw a quadratic Bezier curve as a thick stroke (samples + drawLine)
+function drawCurve(p0, p1, p2, thickness, rgba, steps = 32) {
+  let prev = p0;
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const u = 1 - t;
+    const x = u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0];
+    const y = u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1];
+    drawLine(prev[0], prev[1], x, y, thickness, rgba);
+    prev = [x, y];
+  }
+}
+
 // --- Draw ---
 fillRoundedRect(0, 0, SIZE, SIZE, RADIUS, BG);
+radialGlow(SIZE / 2, SIZE / 2 + 12, 160, BG_GLOW);
 
-// Play triangle (debug arrow), pointing right, slightly offset left to leave room for step dots
 const cx = SIZE / 2;
-const cy = SIZE / 2;
-const tHalf = 56;
-const tWidth = 76;
-const tOffsetX = -16;
-fillTriangle(
-  [cx - tWidth / 2 + tOffsetX, cy - tHalf],
-  [cx - tWidth / 2 + tOffsetX, cy + tHalf],
-  [cx + tWidth / 2 + tOffsetX, cy],
-  ACCENT
-);
+const bodyCy = SIZE / 2 + 32;   // bug sits lower so antennae have breathing room at top
+const headCy = bodyCy - 60;     // head above body
 
-// Three "step" dots cascading down-right of the triangle tip — represents stepping through code
-const dotR = 10;
-const dotStartX = cx + tWidth / 2 + tOffsetX + 26;
-const dotStartY = cy - 28;
-for (let i = 0; i < 3; i++) {
-  const dx = dotStartX + i * 0;
-  const dy = dotStartY + i * 28;
-  fillCircle(dx, dy, dotR, i === 0 ? ACCENT : ACCENT_DIM);
+// --- Antennae as clean circuit traces with square L-bend routing ---
+// Head -> diagonal up-out -> horizontal -> connector. A single inline
+// junction node sits on the diagonal segment to evoke signal routing.
+const antennaThickness = 6;
+const headTopL = [cx - 10, headCy - 18];
+const headTopR = [cx + 10, headCy - 18];
+const bendL = [cx - 50, headCy - 48];
+const bendR = [cx + 50, headCy - 48];
+const tipL = [cx - 80, headCy - 48];
+const tipR = [cx + 80, headCy - 48];
+
+// Left antenna: head -> bend -> tip (diagonal then horizontal)
+drawLine(headTopL[0], headTopL[1], bendL[0], bendL[1], antennaThickness, WIRE);
+drawLine(bendL[0], bendL[1], tipL[0], tipL[1], antennaThickness, WIRE);
+// Right antenna: mirror
+drawLine(headTopR[0], headTopR[1], bendR[0], bendR[1], antennaThickness, WIRE);
+drawLine(bendR[0], bendR[1], tipR[0], tipR[1], antennaThickness, WIRE);
+
+// Inline junction nodes on the diagonal segment — circuit "via" feel.
+function lerp(a, b, t) {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
 }
+const jL = lerp(headTopL, bendL, 0.6);
+const jR = lerp(headTopR, bendR, 0.6);
+fillCircle(jL[0], jL[1], 7, WIRE);
+fillCircle(jL[0], jL[1], 3.5, BG);
+fillCircle(jR[0], jR[1], 7, WIRE);
+fillCircle(jR[0], jR[1], 3.5, BG);
+
+// Connector nodes (the "plugged into AI" part) — large rounded squares
+function fillRoundedNode(nx, ny, half, r, fill, outline) {
+  fillRoundedRect(nx - half, ny - half, half * 2, half * 2, r, outline);
+  fillRoundedRect(nx - half + 3, ny - half + 3, half * 2 - 6, half * 2 - 6, Math.max(0, r - 3), fill);
+}
+fillRoundedNode(tipL[0], tipL[1], 14, 5, NODE, WIRE);
+fillRoundedNode(tipR[0], tipR[1], 14, 5, NODE, WIRE);
+// Small inner dot for a "pin" on each connector
+fillCircle(tipL[0], tipL[1], 4, BG);
+fillCircle(tipR[0], tipR[1], 4, BG);
+
+// --- Body shadow under the bug ---
+fillEllipse(cx, bodyCy + 9, 72, 60, BUG_DARK);
+
+// --- Bug body (main ellipse, slightly taller than wide) ---
+fillEllipse(cx, bodyCy, 66, 58, BUG);
+
+// Top sheen — narrow lighter band on the upper third
+fillEllipse(cx, bodyCy - 22, 46, 14, BUG_HILITE);
+
+// Center seam (vertical line dividing wing-cases)
+drawLine(cx, bodyCy - 52, cx, bodyCy + 52, 4, BUG_DARK);
+
+// Ladybug spots — 3 per side, staggered for a more insect-y feel
+fillCircle(cx - 30, bodyCy - 14, 9, SPOT);
+fillCircle(cx + 30, bodyCy - 14, 9, SPOT);
+fillCircle(cx - 20, bodyCy + 14, 8, SPOT);
+fillCircle(cx + 20, bodyCy + 14, 8, SPOT);
+fillCircle(cx - 12, bodyCy + 38, 6, SPOT);
+fillCircle(cx + 12, bodyCy + 38, 6, SPOT);
+
+// --- Head (smaller dark ellipse above body, partly overlapping) ---
+fillEllipse(cx, headCy, 26, 22, BUG_DARK);
 
 // --- Encode PNG ---
 function crc32(buf) {
@@ -188,13 +262,12 @@ const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const ihdr = Buffer.alloc(13);
 ihdr.writeUInt32BE(SIZE, 0);
 ihdr.writeUInt32BE(SIZE, 4);
-ihdr[8] = 8; // bit depth
-ihdr[9] = 6; // color type RGBA
+ihdr[8] = 8;
+ihdr[9] = 6;
 ihdr[10] = 0;
 ihdr[11] = 0;
 ihdr[12] = 0;
 
-// Filter byte 0 per scanline + RGBA pixels
 const rowBytes = SIZE * 4;
 const raw = Buffer.alloc((rowBytes + 1) * SIZE);
 for (let y = 0; y < SIZE; y++) {

@@ -49,6 +49,10 @@
       {
         "command": "vscodeDebugMcp.resetInstallPrompt",
         "title": "Debug MCP: Reset Install Prompt"
+      },
+      {
+        "command": "vscodeDebugMcp.showMenu",
+        "title": "Debug MCP: Show Menu"
       }
     ],
     "configuration": {
