@@ -19,6 +19,7 @@
   "categories": ["Debuggers", "AI", "Other"],
   "keywords": ["mcp", "debug", "ai", "claude", "copilot"],
   "main": "./out/extension.js",
+  "icon": "media/icon.png",
   "activationEvents": [
     "onStartupFinished"
   ],

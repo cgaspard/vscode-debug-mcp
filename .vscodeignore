@@ -1,8 +1,14 @@
 .vscode/**
 .vscode-test/**
+.github/**
+.claude/**
 src/**
+sample-workspace/**
+releasenotes/**
+scripts/**
 .gitignore
 .eslintrc.json
+.mcp.json
 **/tsconfig.json
 **/*.map
 **/*.ts

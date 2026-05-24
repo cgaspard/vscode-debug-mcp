@@ -33,10 +33,12 @@ Then install the resulting file via `code --install-extension vscode-debug-mcp-*
 
 ## Connect from Claude Code
 
-When the extension activates and detects that Claude Code (`anthropic.claude-code`) is installed, it offers a one-time prompt to register the MCP server for you. You pick the scope:
+When the extension activates and detects that Claude Code (`anthropic.claude-code`) is installed, it offers a one-time prompt to set things up for you. You pick a scope:
 
-- **This workspace** — writes `.mcp.json` in the project root (shared with collaborators via git)
-- **User settings (all projects)** — writes to `~/.claude/settings.json` so it works in every workspace
+- **This workspace** — writes `.mcp.json` in the project root and `.claude/skills/debug-mcp/SKILL.md` (both shared via git)
+- **User settings (all projects)** — writes to `~/.claude/settings.json` and `~/.claude/skills/debug-mcp/SKILL.md` so both work in every workspace
+
+A second prompt asks whether to also install the **debug-mcp usage skill** — a markdown file Claude Code auto-loads when relevant. The skill teaches Claude when to reach for these tools, how to sequence breakpoints/stack/scope/variables inspection, and which gotchas to watch for. Recommended.
 
 You can re-open the picker any time via the command palette: **Debug MCP: Configure Claude Code…**.
 

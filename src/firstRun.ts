@@ -5,6 +5,7 @@ import * as os from 'os';
 
 const CLAUDE_CODE_EXT_ID = 'anthropic.claude-code';
 const SERVER_KEY = 'vscode-debug';
+const SKILL_NAME = 'debug-mcp';
 const PROMPTED_KEY = 'debugMcp.installPrompted';
 
 interface McpJson {
@@ -41,30 +42,53 @@ async function writeMergedMcpJson(file: string, url: string): Promise<'created' 
   return existing.mcpServers ? 'updated' : 'created';
 }
 
+async function writeSkill(skillDir: string, sourceFile: string): Promise<'created' | 'updated'> {
+  const targetFile = path.join(skillDir, 'SKILL.md');
+  const desired = await fs.readFile(sourceFile, 'utf8');
+  let existed = false;
+  try {
+    const current = await fs.readFile(targetFile, 'utf8');
+    if (current === desired) return 'updated';
+    existed = true;
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  await fs.mkdir(skillDir, { recursive: true });
+  await fs.writeFile(targetFile, desired, 'utf8');
+  return existed ? 'updated' : 'created';
+}
+
 export function claudeCodeInstalled(): boolean {
   return Boolean(vscode.extensions.getExtension(CLAUDE_CODE_EXT_ID));
 }
 
-export interface InstallTarget {
+interface InstallTarget {
   label: string;
   description: string;
-  file: string;
+  mcpFile: string;
+  skillDir: string;
+  scope: 'workspace' | 'user';
 }
 
 function targets(): InstallTarget[] {
   const out: InstallTarget[] = [];
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (folder) {
+    const root = folder.uri.fsPath;
     out.push({
       label: 'This workspace',
-      description: 'Write .mcp.json in the project root (shared with collaborators via git).',
-      file: path.join(folder.uri.fsPath, '.mcp.json')
+      description: 'Write .mcp.json + skill into the project (shared with collaborators via git).',
+      mcpFile: path.join(root, '.mcp.json'),
+      skillDir: path.join(root, '.claude', 'skills', SKILL_NAME),
+      scope: 'workspace'
     });
   }
   out.push({
     label: 'User settings (all projects)',
-    description: 'Register globally in ~/.claude/settings.json — available in every workspace you open.',
-    file: path.join(os.homedir(), '.claude', 'settings.json')
+    description: 'Register globally in ~/.claude/ — available in every workspace you open.',
+    mcpFile: path.join(os.homedir(), '.claude', 'settings.json'),
+    skillDir: path.join(os.homedir(), '.claude', 'skills', SKILL_NAME),
+    scope: 'user'
   });
   return out;
 }
@@ -95,30 +119,58 @@ export async function offerInstall(
   const items = targets().map((t) => ({
     label: t.label,
     description: t.description,
-    detail: t.file,
+    detail: `MCP: ${t.mcpFile}\nSkill: ${t.skillDir}/SKILL.md`,
     target: t
   }));
   const pick = await vscode.window.showQuickPick(items, {
-    title: 'Where should the MCP server be registered?',
-    placeHolder: 'Pick a scope'
+    title: 'Where should Debug MCP be registered?',
+    placeHolder: 'Pick a scope (applies to both MCP config and skill)'
   });
   if (!pick) return;
 
-  try {
-    const result = await writeMergedMcpJson(pick.target.file, serverUrl);
-    await context.globalState.update(PROMPTED_KEY, true);
-    const verb = result === 'created' ? 'Created' : result === 'updated' ? 'Updated' : 'Already configured in';
-    const action = await vscode.window.showInformationMessage(
-      `${verb} ${pick.target.file}. Reload Claude Code to pick up the change.`,
-      'Open file'
-    );
-    if (action === 'Open file') {
-      const doc = await vscode.workspace.openTextDocument(pick.target.file);
-      await vscode.window.showTextDocument(doc);
+  const includeSkill = await vscode.window.showQuickPick(
+    [
+      { label: 'Yes (recommended)', description: 'Install the usage skill so Claude knows how to drive these tools well.', value: true },
+      { label: 'No', description: 'Only register the MCP server.', value: false }
+    ],
+    {
+      title: 'Also install the debug-mcp usage skill?',
+      placeHolder: 'The skill is a markdown file Claude auto-loads when relevant.'
     }
+  );
+  if (!includeSkill) return; // user dismissed
+
+  const written: string[] = [];
+
+  try {
+    const mcpResult = await writeMergedMcpJson(pick.target.mcpFile, serverUrl);
+    written.push(`${mcpResult === 'created' ? 'Created' : mcpResult === 'updated' ? 'Updated' : 'Verified'} ${pick.target.mcpFile}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    vscode.window.showErrorMessage(`Failed to write ${pick.target.file}: ${msg}`);
+    vscode.window.showErrorMessage(`Failed to write ${pick.target.mcpFile}: ${msg}`);
+    return;
+  }
+
+  if (includeSkill.value) {
+    const sourceSkill = path.join(context.extensionPath, 'resources', 'skill', 'SKILL.md');
+    try {
+      const skillResult = await writeSkill(pick.target.skillDir, sourceSkill);
+      written.push(`${skillResult === 'created' ? 'Installed' : 'Updated'} skill at ${pick.target.skillDir}/SKILL.md`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      vscode.window.showWarningMessage(`MCP config written, but skill install failed: ${msg}`);
+    }
+  }
+
+  await context.globalState.update(PROMPTED_KEY, true);
+
+  const action = await vscode.window.showInformationMessage(
+    `${written.join('. ')}. Reload Claude Code to pick up changes.`,
+    'Open MCP file'
+  );
+  if (action === 'Open MCP file') {
+    const doc = await vscode.workspace.openTextDocument(pick.target.mcpFile);
+    await vscode.window.showTextDocument(doc);
   }
 }
 
