@@ -1,14 +1,17 @@
-version: 0.1.2
+version: 0.1.3
 date: 2026-05-24
 highlights:
-  - Initial usable release. Drive your VS Code debugger, launch configs, tasks, terminals, and debug console from AI assistants — over MCP (Claude Code, Cursor, Windsurf) or VS Code's Language Model Tools API (Copilot agent mode, no MCP setup needed).
-  - Cross-window cluster — multiple VS Code windows share one MCP server. The leader window owns the HTTP endpoint; followers join over IPC. Discovery is by port probing (no lockfile to go stale).
+  - Initial release. Drive your VS Code debugger, launch configs, tasks, terminals, and debug console from AI assistants — over MCP (Claude Code, Cursor, Windsurf) or VS Code's Language Model Tools API (Copilot agent mode, no MCP setup needed).
+  - Cross-window cluster — multiple VS Code windows share one MCP server. The leader window owns the HTTP endpoint; followers join over IPC. Discovery is by port probing (no lockfile).
   - Auto-updates from GitHub Releases. One-line installer, no marketplace needed.
 added:
   - Streamable HTTP MCP server bound to 127.0.0.1:6736 by default.
   - Language Model Tools integration so Copilot agent mode can use the same capabilities without an MCP client. Write-y tools (start/stop debug, run/stop task, set/clear breakpoints, run in terminal, evaluate) confirm with the user before invoking; read-only tools run silently.
-  - One-click installer flow for Claude Code — registers the MCP server in .mcp.json (workspace) or ~/.claude/settings.json (user scope), and optionally installs the bundled debug-mcp usage skill.
-  - debug-mcp usage skill that teaches Claude to prefer launch.json + tasks over raw Bash so the user can interact with the running session, and to call list_workspaces / bind_workspace at the start of multi-window sessions.
+  - One-click installer for Claude Code. Workspace scope writes .mcp.json into the project (git-shared). User scope shells out to 'claude mcp add --scope user' so the registration lands in ~/.claude.json where Claude Code actually reads user-scope MCP from.
+  - debug-mcp usage skill installed globally at ~/.claude/skills/debug-mcp/ regardless of MCP scope — skills are description-gated, so a global install only activates in debugging-relevant conversations. Teaches Claude to prefer launch.json + tasks over raw Bash, and to call list_workspaces / bind_workspace at the start of multi-window sessions.
+  - Smart re-prompting — the install prompt fires whenever the current workspace isn't configured AND user scope isn't configured. Picking 'Don't ask again' suppresses it permanently (until you run 'Reset Install Prompt'). Picking a scope and completing the install does NOT suppress prompts in other workspaces — opening a different repo with no .mcp.json will still prompt if you only configured workspace scope.
+  - 'Debug MCP - Uninstall Claude Code Support…' command — multi-select picker to remove user-scope registration, current workspace .mcp.json entry, and/or the global skill.
+  - Best-effort cleanup of the global skill on extension uninstall (deactivate hook).
   - Multi-window cluster — first VS Code window to start becomes the leader and owns the HTTP server; subsequent windows register as followers over a Unix socket. The leader exposes GET /cluster so new windows can discover it after port-probe.
   - list_workspaces and bind_workspace MCP tools so the AI can route tool calls to a specific window. Workspace ids are sha256(path).slice(0,12) — stable across restarts.
   - Launch tools — list_launch_configurations, start_debugging, stop_debugging, continue/pause/step_over/in/out.
@@ -22,6 +25,7 @@ added:
   - Sample workspace under sample-workspace/ for end-to-end testing.
   - Leader failover — when the leader window closes, followers automatically retry the discovery flow and the next candidate naturally becomes the new leader.
   - Clear error message when the configured port is held by something other than Debug MCP, instead of a raw EADDRINUSE trace.
+  - Architecture diagram + workspace-routing explanation in README.
 changed: []
 fixed: []
 removed: []

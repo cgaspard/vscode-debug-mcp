@@ -2,7 +2,7 @@
   "name": "vscode-debug-mcp",
   "displayName": "VS Code Debug MCP",
   "description": "MCP server exposing VS Code debugging, terminals, debug console, launch configurations, and tasks to AI assistants.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "cgaspard",
   "license": "MIT",
   "repository": {
@@ -57,6 +57,10 @@
       {
         "command": "vscodeDebugMcp.checkForUpdates",
         "title": "Debug MCP: Check for Updates"
+      },
+      {
+        "command": "vscodeDebugMcp.uninstallClaudeCode",
+        "title": "Debug MCP: Uninstall Claude Code Support…"
       }
     ],
     "languageModelTools": [

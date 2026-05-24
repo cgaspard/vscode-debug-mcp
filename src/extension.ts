@@ -1,7 +1,14 @@
 import * as vscode from 'vscode';
 import { CaptureManager } from './capture';
 import { startMcpServer, type RunningServer, type MCPServerEnv } from './mcpServer';
-import { offerInstall, resetInstallPromptFlag, getConfigState, claudeCodeInstalled } from './firstRun';
+import {
+  offerInstall,
+  resetInstallPromptFlag,
+  getConfigState,
+  claudeCodeInstalled,
+  uninstallClaudeCodeSupport,
+  deactivateCleanup
+} from './firstRun';
 import { registerLmTools } from './lmTools';
 import { checkForUpdate } from './updater';
 import { buildLocalToolHandlers, type Tool } from './toolHandlers';
@@ -373,6 +380,56 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('vscodeDebugMcp.showMenu', showStatusBarMenu),
     vscode.commands.registerCommand('vscodeDebugMcp.checkForUpdates', async () => {
       await checkForUpdate(context, { force: true });
+    }),
+    vscode.commands.registerCommand('vscodeDebugMcp.uninstallClaudeCode', async () => {
+      const state = await getConfigState();
+      const hasWorkspace = state.workspaceConfigured;
+      const hasUser = state.userConfigured;
+
+      if (!hasWorkspace && !hasUser) {
+        vscode.window.showInformationMessage('Debug MCP: nothing to uninstall — no Claude Code config or skill found.');
+        return;
+      }
+
+      const items: { label: string; description: string; picked: boolean; value: 'user' | 'workspace' | 'skill' }[] = [];
+      if (hasUser) {
+        items.push({
+          label: '$(globe) User-scope MCP registration',
+          description: 'Run `claude mcp remove --scope user vscode-debug`',
+          picked: true,
+          value: 'user'
+        });
+      }
+      if (hasWorkspace) {
+        items.push({
+          label: '$(folder) Workspace .mcp.json entry',
+          description: 'Remove vscode-debug from this workspace\'s .mcp.json',
+          picked: true,
+          value: 'workspace'
+        });
+      }
+      items.push({
+        label: '$(book) Global skill (~/.claude/skills/debug-mcp/)',
+        description: 'Remove the debug-mcp usage skill from your Claude Code config',
+        picked: true,
+        value: 'skill'
+      });
+
+      const picks = await vscode.window.showQuickPick(items, {
+        title: 'Uninstall Claude Code Support',
+        placeHolder: 'Pick what to remove (use space to toggle)',
+        canPickMany: true
+      });
+      if (!picks || picks.length === 0) return;
+
+      const removed = await uninstallClaudeCodeSupport({
+        removeUserMcp: picks.some((p) => p.value === 'user'),
+        removeWorkspaceMcp: picks.some((p) => p.value === 'workspace'),
+        removeSkill: picks.some((p) => p.value === 'skill')
+      });
+      await vscode.window.showInformationMessage(
+        `${removed.join('. ') || 'Nothing to remove.'} Reload Claude Code to pick up changes.`
+      );
     })
   );
 
@@ -411,6 +468,11 @@ export async function activate(context: vscode.ExtensionContext) {
   void checkForUpdate(context, { silent: true });
 }
 
-export function deactivate() {
-  return stopServer();
+export async function deactivate() {
+  // Best-effort cleanup. We don't await Claude Code config removal —
+  // that requires the user to actively confirm via the Uninstall
+  // command. Here we only remove the global skill so leaving uninstall
+  // residue is minimal.
+  await stopServer();
+  await deactivateCleanup();
 }
