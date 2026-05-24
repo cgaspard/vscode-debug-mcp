@@ -1,11 +1,13 @@
 import * as vscode from 'vscode';
 import { CaptureManager } from './capture';
 import { startMcpServer, type RunningServer } from './mcpServer';
+import { offerInstall, resetInstallPromptFlag } from './firstRun';
 
 let capture: CaptureManager | undefined;
 let server: RunningServer | undefined;
 let statusBar: vscode.StatusBarItem | undefined;
 let output: vscode.OutputChannel | undefined;
+let extensionContext: vscode.ExtensionContext | undefined;
 
 function log(msg: string) {
   if (!output) output = vscode.window.createOutputChannel('Debug MCP');
@@ -41,6 +43,9 @@ async function startServer() {
     server = await startMcpServer(capture);
     log(`MCP server listening at ${server.url}`);
     vscode.window.showInformationMessage(`Debug MCP running at ${server.url}`);
+    if (extensionContext) {
+      void offerInstall(extensionContext, server.url);
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log(`Failed to start MCP server: ${msg}`);
@@ -62,6 +67,7 @@ async function stopServer() {
 }
 
 export async function activate(context: vscode.ExtensionContext) {
+  extensionContext = context;
   output = vscode.window.createOutputChannel('Debug MCP');
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   context.subscriptions.push(output, statusBar);
@@ -83,6 +89,21 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       await vscode.env.clipboard.writeText(server.url);
       vscode.window.showInformationMessage(`Copied ${server.url} to clipboard`);
+    }),
+    vscode.commands.registerCommand('vscodeDebugMcp.configureClaudeCode', async () => {
+      if (!server) {
+        const choice = await vscode.window.showWarningMessage(
+          'The MCP server is not running. Start it first to configure Claude Code.',
+          'Start server'
+        );
+        if (choice === 'Start server') await startServer();
+        if (!server) return;
+      }
+      await offerInstall(context, server!.url, { force: true });
+    }),
+    vscode.commands.registerCommand('vscodeDebugMcp.resetInstallPrompt', async () => {
+      await resetInstallPromptFlag(context);
+      vscode.window.showInformationMessage('Debug MCP: install prompt will show again next activation.');
     })
   );
 

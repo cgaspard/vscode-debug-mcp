@@ -39,6 +39,14 @@
       {
         "command": "vscodeDebugMcp.copyUrl",
         "title": "Debug MCP: Copy Server URL"
+      },
+      {
+        "command": "vscodeDebugMcp.configureClaudeCode",
+        "title": "Debug MCP: Configure Claude Code…"
+      },
+      {
+        "command": "vscodeDebugMcp.resetInstallPrompt",
+        "title": "Debug MCP: Reset Install Prompt"
       }
     ],
     "configuration": {

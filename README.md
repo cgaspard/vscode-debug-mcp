@@ -2,7 +2,7 @@
 
 A VS Code extension that exposes a **Model Context Protocol** (MCP) server so AI assistants (Claude Code, Cursor, Copilot, etc.) can drive your debugger, run tasks, launch configurations from `launch.json`, and read terminal and debug-console output — all inside your live VS Code session.
 
-Inspired by [`rauschit.vscode-debugger-mcp-server`](https://marketplace.visualstudio.com/items?itemName=rauschit.vscode-debugger-mcp-server), with extra capabilities:
+Capabilities:
 
 - Read terminal output (via VS Code shell integration)
 - Read the debug console
@@ -32,6 +32,15 @@ npm run package
 Then install the resulting file via `code --install-extension vscode-debug-mcp-*.vsix`.
 
 ## Connect from Claude Code
+
+When the extension activates and detects that Claude Code (`anthropic.claude-code`) is installed, it offers a one-time prompt to register the MCP server for you. You pick the scope:
+
+- **This workspace** — writes `.mcp.json` in the project root (shared with collaborators via git)
+- **User settings (all projects)** — writes to `~/.claude/settings.json` so it works in every workspace
+
+You can re-open the picker any time via the command palette: **Debug MCP: Configure Claude Code…**.
+
+If you'd rather do it manually:
 
 ```bash
 claude mcp add --transport http vscode-debug http://127.0.0.1:6736/mcp
