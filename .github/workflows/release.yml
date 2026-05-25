@@ -79,3 +79,19 @@ jobs:
             vscode-debug-mcp.vsix
           draft: false
           prerelease: ${{ contains(steps.ver.outputs.version, '-') }}
+
+      # Publish to the VS Code Marketplace. We upload the exact .vsix that
+      # was attached to the GitHub Release so the two artifacts are
+      # byte-identical. Skipped for pre-release tags (e.g. v0.3.0-rc.1)
+      # since those shouldn't ship to end users.
+      - name: Publish to VS Code Marketplace
+        if: ${{ !contains(steps.ver.outputs.version, '-') }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "::error::VSCE_PAT secret is not set. Skipping marketplace publish."
+            echo "::error::Add a Personal Access Token (Marketplace > Manage scope) at Settings > Secrets and variables > Actions > VSCE_PAT."
+            exit 1
+          fi
+          npx vsce publish --packagePath "vscode-debug-mcp-${{ steps.ver.outputs.version }}.vsix"
