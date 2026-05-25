@@ -1,0 +1,15 @@
+version: 0.2.0
+date: 2026-05-24
+highlights:
+  - First release published to the VS Code Marketplace — install from inside VS Code without a .vsix download.
+  - Extension is now bundled with esbuild — install size dropped from 2.78 MB / 1837 files to 424 KB / 8 files, and activation is faster.
+  - MCP server identity now reports the actual package version instead of a hardcoded 0.1.0.
+added:
+  - Marketplace publication under the `cgaspard.vscode-debug-mcp` listing.
+  - esbuild-based bundling pipeline (`npm run compile` / `npm run watch` / `npm run build:production`) producing a single `out/extension.js`.
+changed:
+  - `tsconfig.json` is now `noEmit: true` and used only for typechecking; all emission goes through esbuild.
+  - `.vscodeignore` excludes `node_modules/**` entirely now that dependencies are bundled into the extension binary.
+  - MCP server `serverInfo.version` is sourced from `package.json` at build time so it always matches the release.
+fixed: []
+removed: []

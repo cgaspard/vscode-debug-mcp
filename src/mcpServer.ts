@@ -9,6 +9,9 @@ import { z } from 'zod';
 
 import type { WorkspaceInfo, ClusterInfo } from './cluster';
 
+// Bundled at build time; esbuild inlines the JSON.
+import { version as PACKAGE_VERSION } from '../package.json';
+
 function jsonResult(value: unknown) {
   return {
     content: [
@@ -46,7 +49,7 @@ export interface MCPServerEnv {
 
 function buildMcpServer(env: MCPServerEnv, sessionWorkspace: Map<string, string>, sessionId: () => string | undefined): McpServer {
   const server = new McpServer(
-    { name: 'vscode-debug-mcp', version: '0.1.0' },
+    { name: 'vscode-debug-mcp', version: PACKAGE_VERSION },
     { capabilities: { tools: {}, logging: {} } }
   );
 

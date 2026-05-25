@@ -2,7 +2,7 @@
   "name": "vscode-debug-mcp",
   "displayName": "VS Code Debug MCP",
   "description": "MCP server exposing VS Code debugging, terminals, debug console, launch configurations, and tasks to AI assistants.",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "publisher": "cgaspard",
   "license": "MIT",
   "repository": {
@@ -16,8 +16,18 @@
   "engines": {
     "vscode": "^1.90.0"
   },
-  "categories": ["Debuggers", "AI", "Other"],
-  "keywords": ["mcp", "debug", "ai", "claude", "copilot"],
+  "categories": [
+    "Debuggers",
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "mcp",
+    "debug",
+    "ai",
+    "claude",
+    "copilot"
+  ],
   "main": "./out/extension.js",
   "icon": "media/icon.png",
   "activationEvents": [
@@ -71,20 +81,35 @@
         "userDescription": "List active debug sessions",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "debugSessions",
-        "tags": ["debug-mcp"],
-        "inputSchema": { "type": "object", "properties": {} }
+        "tags": [
+          "debug-mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "debugMcp_get_last_stopped_event",
         "displayName": "Get last stopped event",
         "modelDescription": "Read the most recent stopped event for a debug session — file, line, thread, reason, and stack-trace snapshot. The snapshot is captured at the moment of the pause, so it remains queryable even after the user continues execution. Use this when joining a chat where the user already has (or had) a debug session in progress, to understand 'where were they paused' without needing the session to still be paused right now.",
         "userDescription": "Read last stopped event",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
           "properties": {
-            "sessionId": { "type": "string", "description": "Session id from list_debug_sessions. Omit to use the active or most-recently-paused session." },
-            "levels": { "type": "number", "minimum": 1, "maximum": 50, "description": "Max stack frames to include (default 5)." }
+            "sessionId": {
+              "type": "string",
+              "description": "Session id from list_debug_sessions. Omit to use the active or most-recently-paused session."
+            },
+            "levels": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 50,
+              "description": "Max stack frames to include (default 5)."
+            }
           }
         }
       },
@@ -95,20 +120,33 @@
         "userDescription": "Read launch.json configurations",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "debugConfigs",
-        "tags": ["debug-mcp"],
-        "inputSchema": { "type": "object", "properties": {} }
+        "tags": [
+          "debug-mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "debugMcp_start_debugging",
         "displayName": "Start debugging",
         "modelDescription": "Start a VS Code debug session by launch.json configuration name. Prefer this over running the program via the terminal — the user gets a real interactive debug session with breakpoints, variable inspection, and the debug console.",
         "userDescription": "Start a debug session",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
           "properties": {
-            "name": { "type": "string", "description": "Configuration name from launch.json. Omit to use the default." },
-            "workspaceFolder": { "type": "string", "description": "Workspace folder name (optional)." }
+            "name": {
+              "type": "string",
+              "description": "Configuration name from launch.json. Omit to use the default."
+            },
+            "workspaceFolder": {
+              "type": "string",
+              "description": "Workspace folder name (optional)."
+            }
           }
         }
       },
@@ -117,18 +155,29 @@
         "displayName": "Stop debugging",
         "modelDescription": "Stop the active VS Code debug session.",
         "userDescription": "Stop the active debug session",
-        "tags": ["debug-mcp"],
-        "inputSchema": { "type": "object", "properties": {} }
+        "tags": [
+          "debug-mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "debugMcp_continue_execution",
         "displayName": "Continue execution",
         "modelDescription": "Continue execution in the active debug session.",
         "userDescription": "Resume execution",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "properties": { "threadId": { "type": "number" } }
+          "properties": {
+            "threadId": {
+              "type": "number"
+            }
+          }
         }
       },
       {
@@ -136,10 +185,16 @@
         "displayName": "Step over",
         "modelDescription": "Step over the current statement in the active debug session.",
         "userDescription": "Step over",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "properties": { "threadId": { "type": "number" } }
+          "properties": {
+            "threadId": {
+              "type": "number"
+            }
+          }
         }
       },
       {
@@ -147,10 +202,16 @@
         "displayName": "Step in",
         "modelDescription": "Step into the next function call in the active debug session.",
         "userDescription": "Step into",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "properties": { "threadId": { "type": "number" } }
+          "properties": {
+            "threadId": {
+              "type": "number"
+            }
+          }
         }
       },
       {
@@ -158,10 +219,16 @@
         "displayName": "Step out",
         "modelDescription": "Step out of the current function in the active debug session.",
         "userDescription": "Step out",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "properties": { "threadId": { "type": "number" } }
+          "properties": {
+            "threadId": {
+              "type": "number"
+            }
+          }
         }
       },
       {
@@ -169,20 +236,33 @@
         "displayName": "Get threads",
         "modelDescription": "List threads in the active debug session.",
         "userDescription": "List debug threads",
-        "tags": ["debug-mcp"],
-        "inputSchema": { "type": "object", "properties": {} }
+        "tags": [
+          "debug-mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "debugMcp_get_stack_trace",
         "displayName": "Get stack trace",
         "modelDescription": "Get the stack trace for a thread in the active debug session.",
         "userDescription": "Read stack trace",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
           "properties": {
-            "threadId": { "type": "number" },
-            "levels": { "type": "number", "minimum": 1, "maximum": 200 }
+            "threadId": {
+              "type": "number"
+            },
+            "levels": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 200
+            }
           }
         }
       },
@@ -191,11 +271,19 @@
         "displayName": "Get scopes",
         "modelDescription": "Get the variable scopes for a given stack frame in the active debug session.",
         "userDescription": "Read variable scopes",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["frameId"],
-          "properties": { "frameId": { "type": "number" } }
+          "required": [
+            "frameId"
+          ],
+          "properties": {
+            "frameId": {
+              "type": "number"
+            }
+          }
         }
       },
       {
@@ -203,11 +291,19 @@
         "displayName": "Get variables",
         "modelDescription": "Get the variables under a given variablesReference (from get_scopes or a parent variable).",
         "userDescription": "Read variables",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["variablesReference"],
-          "properties": { "variablesReference": { "type": "number" } }
+          "required": [
+            "variablesReference"
+          ],
+          "properties": {
+            "variablesReference": {
+              "type": "number"
+            }
+          }
         }
       },
       {
@@ -215,14 +311,29 @@
         "displayName": "Evaluate expression",
         "modelDescription": "Evaluate an expression in the active debug session. Avoid side-effecting expressions — they will mutate the running program.",
         "userDescription": "Evaluate an expression at the current frame",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["expression"],
+          "required": [
+            "expression"
+          ],
           "properties": {
-            "expression": { "type": "string" },
-            "frameId": { "type": "number" },
-            "context": { "type": "string", "enum": ["watch", "repl", "hover"] }
+            "expression": {
+              "type": "string"
+            },
+            "frameId": {
+              "type": "number"
+            },
+            "context": {
+              "type": "string",
+              "enum": [
+                "watch",
+                "repl",
+                "hover"
+              ]
+            }
           }
         }
       },
@@ -231,24 +342,46 @@
         "displayName": "List breakpoints",
         "modelDescription": "List all breakpoints registered in VS Code.",
         "userDescription": "List breakpoints",
-        "tags": ["debug-mcp"],
-        "inputSchema": { "type": "object", "properties": {} }
+        "tags": [
+          "debug-mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "debugMcp_set_breakpoint",
         "displayName": "Set breakpoint",
         "modelDescription": "Add a source breakpoint at the given file and 1-based line. Use absolute paths.",
         "userDescription": "Set a breakpoint",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["file", "line"],
+          "required": [
+            "file",
+            "line"
+          ],
           "properties": {
-            "file": { "type": "string", "description": "Absolute file path." },
-            "line": { "type": "number", "minimum": 1 },
-            "condition": { "type": "string" },
-            "hitCondition": { "type": "string" },
-            "logMessage": { "type": "string" }
+            "file": {
+              "type": "string",
+              "description": "Absolute file path."
+            },
+            "line": {
+              "type": "number",
+              "minimum": 1
+            },
+            "condition": {
+              "type": "string"
+            },
+            "hitCondition": {
+              "type": "string"
+            },
+            "logMessage": {
+              "type": "string"
+            }
           }
         }
       },
@@ -257,11 +390,19 @@
         "displayName": "Remove breakpoint",
         "modelDescription": "Remove a breakpoint by its ID (from get_all_breakpoints).",
         "userDescription": "Remove a breakpoint",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["id"],
-          "properties": { "id": { "type": "string" } }
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
         }
       },
       {
@@ -269,21 +410,36 @@
         "displayName": "Clear all breakpoints",
         "modelDescription": "Remove every breakpoint in VS Code. Destructive — confirms with the user first.",
         "userDescription": "Clear all breakpoints",
-        "tags": ["debug-mcp"],
-        "inputSchema": { "type": "object", "properties": {} }
+        "tags": [
+          "debug-mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "debugMcp_toggle_breakpoint",
         "displayName": "Toggle breakpoint",
         "modelDescription": "Toggle a source breakpoint at the given file/line (1-based).",
         "userDescription": "Toggle a breakpoint",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["file", "line"],
+          "required": [
+            "file",
+            "line"
+          ],
           "properties": {
-            "file": { "type": "string" },
-            "line": { "type": "number", "minimum": 1 }
+            "file": {
+              "type": "string"
+            },
+            "line": {
+              "type": "number",
+              "minimum": 1
+            }
           }
         }
       },
@@ -292,21 +448,34 @@
         "displayName": "List tasks",
         "modelDescription": "List all tasks visible to VS Code (workspace tasks.json + extension-contributed). Use this before suggesting a way to run a build/test/dev server — the user likely already defined a task.",
         "userDescription": "Read tasks.json",
-        "tags": ["debug-mcp"],
-        "inputSchema": { "type": "object", "properties": {} }
+        "tags": [
+          "debug-mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "debugMcp_run_task",
         "displayName": "Run task",
         "modelDescription": "Run a VS Code task by name. Prefer this over running commands directly in the terminal — tasks are visible to the user in VS Code and they can stop them. 'source' disambiguates when multiple tasks share a name.",
         "userDescription": "Run a VS Code task",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["name"],
+          "required": [
+            "name"
+          ],
           "properties": {
-            "name": { "type": "string" },
-            "source": { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
           }
         }
       },
@@ -315,21 +484,34 @@
         "displayName": "List running tasks",
         "modelDescription": "List tasks currently being executed by VS Code.",
         "userDescription": "List running tasks",
-        "tags": ["debug-mcp"],
-        "inputSchema": { "type": "object", "properties": {} }
+        "tags": [
+          "debug-mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "debugMcp_stop_task",
         "displayName": "Stop task",
         "modelDescription": "Stop running task(s) by name (optionally filtered by source).",
         "userDescription": "Stop a running task",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["name"],
+          "required": [
+            "name"
+          ],
           "properties": {
-            "name": { "type": "string" },
-            "source": { "type": "string" }
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
           }
         }
       },
@@ -338,21 +520,36 @@
         "displayName": "List terminals",
         "modelDescription": "List terminals captured via VS Code shell integration.",
         "userDescription": "List terminals",
-        "tags": ["debug-mcp"],
-        "inputSchema": { "type": "object", "properties": {} }
+        "tags": [
+          "debug-mcp"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
       },
       {
         "name": "debugMcp_read_terminal",
         "displayName": "Read terminal output",
         "modelDescription": "Read captured output from a terminal by id or name. Each captured command is bracketed by a $ command header and a [exit N] footer.",
         "userDescription": "Read terminal output",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["idOrName"],
+          "required": [
+            "idOrName"
+          ],
           "properties": {
-            "idOrName": { "type": "string" },
-            "tail": { "type": "number", "minimum": 1, "maximum": 10000 }
+            "idOrName": {
+              "type": "string"
+            },
+            "tail": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10000
+            }
           }
         }
       },
@@ -361,14 +558,24 @@
         "displayName": "Run command in terminal",
         "modelDescription": "Send a command to a VS Code terminal. Prefer 'run_task' for anything the user might want to re-run.",
         "userDescription": "Run a command in a terminal",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["command"],
+          "required": [
+            "command"
+          ],
           "properties": {
-            "command": { "type": "string" },
-            "terminalName": { "type": "string" },
-            "createIfMissing": { "type": "boolean" }
+            "command": {
+              "type": "string"
+            },
+            "terminalName": {
+              "type": "string"
+            },
+            "createIfMissing": {
+              "type": "boolean"
+            }
           }
         }
       },
@@ -377,11 +584,17 @@
         "displayName": "Read debug console",
         "modelDescription": "Read captured output from the VS Code debug console for the active or recent debug sessions.",
         "userDescription": "Read debug console output",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
           "properties": {
-            "tail": { "type": "number", "minimum": 1, "maximum": 10000 }
+            "tail": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10000
+            }
           }
         }
       },
@@ -390,13 +603,21 @@
         "displayName": "Evaluate in debug console",
         "modelDescription": "Evaluate an expression in the debug console REPL of the active session. Avoid side-effecting expressions.",
         "userDescription": "Evaluate in debug console",
-        "tags": ["debug-mcp"],
+        "tags": [
+          "debug-mcp"
+        ],
         "inputSchema": {
           "type": "object",
-          "required": ["expression"],
+          "required": [
+            "expression"
+          ],
           "properties": {
-            "expression": { "type": "string" },
-            "frameId": { "type": "number" }
+            "expression": {
+              "type": "string"
+            },
+            "frameId": {
+              "type": "number"
+            }
           }
         }
       }
@@ -428,10 +649,12 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "package": "vsce package",
+    "vscode:prepublish": "npm run build:production",
+    "compile": "node scripts/build.js",
+    "build:production": "node scripts/build.js --production",
+    "watch": "node scripts/build.js --watch",
+    "typecheck": "tsc -p ./ --noEmit",
+    "package": "npm run typecheck && npm run build:production && vsce package",
     "lint": "tsc -p ./ --noEmit"
   },
   "dependencies": {
@@ -444,6 +667,7 @@
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.28.0",
     "typescript": "^5.4.5"
   }
 }

@@ -12,6 +12,10 @@ scripts/**
 **/tsconfig.json
 **/*.map
 **/*.ts
-node_modules/**/*.md
-node_modules/**/*.ts
-node_modules/**/test/**
+# We bundle with esbuild — out/extension.js is the only runtime artifact we
+# need from this repo. node_modules is excluded entirely because everything
+# resolvable is already inlined into the bundle.
+node_modules/**
+package-lock.json
+*.vsix
+.DS_Store
