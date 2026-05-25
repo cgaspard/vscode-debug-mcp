@@ -294,6 +294,22 @@ export async function startMcpServer(env: MCPServerEnv): Promise<RunningServer> 
   });
 
   const httpServer = http.createServer(app);
+
+  // MCP's Streamable HTTP transport keeps a long-lived SSE stream open on
+  // GET /mcp with no application-level keepalive. Node's defaults
+  // (requestTimeout=5min, headersTimeout=1min) and the OS TCP idle-drop
+  // (~15min on macOS) will tear that stream down between tool calls.
+  // Disable the per-request idle timeouts and enable TCP keepalive on every
+  // accepted socket so the connection survives long idle periods.
+  httpServer.requestTimeout = 0;
+  httpServer.headersTimeout = 0;
+  httpServer.keepAliveTimeout = 0;
+  httpServer.timeout = 0;
+  httpServer.on('connection', (socket) => {
+    socket.setKeepAlive(true, 30_000);
+    socket.setTimeout(0);
+  });
+
   await new Promise<void>((resolve, reject) => {
     const onError = (err: Error) => reject(err);
     httpServer.once('error', onError);

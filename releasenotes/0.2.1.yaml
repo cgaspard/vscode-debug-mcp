@@ -1,0 +1,9 @@
+version: 0.2.1
+date: 2026-05-25
+highlights:
+  - Fix MCP server dying after ~15 minutes of idle SSE stream — the most common stability issue reported on v0.2.0.
+fixed:
+  - SSE stream on GET /mcp no longer drops after ~15 minutes idle. The MCP SDK does not emit application-level keepalives on its standalone SSE stream, so an idle connection was being torn down at the OS/network layer (~899s). The Node HTTP server now uses permissive idle timeouts and enables TCP keepalive on every accepted socket so the connection survives long idle periods between tool calls.
+added: []
+changed: []
+removed: []
