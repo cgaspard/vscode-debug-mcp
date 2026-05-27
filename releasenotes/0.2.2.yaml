@@ -1,0 +1,9 @@
+version: 0.2.2
+date: 2026-05-27
+highlights:
+  - Quieter startup — Debug MCP no longer pops information toasts when the server starts, restarts, or a follower joins a leader. Status is shown in the status bar and the Debug MCP output channel instead.
+fixed: []
+added: []
+changed:
+  - Removed the "Debug MCP already active", "Debug MCP running at … (leader)", and "Debug MCP joined as follower …" information toasts. Errors and explicit user actions (copy URL, configure Claude Code, etc.) still show toasts; routine lifecycle events only log to the output channel now.
+removed: []

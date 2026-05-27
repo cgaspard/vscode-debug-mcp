@@ -202,7 +202,7 @@ async function showStatusBarMenu() {
 async function startServer() {
   if (server || role === 'follower') {
     const where = server ? server.url : 'leader window';
-    vscode.window.showInformationMessage(`Debug MCP already active (${where})`);
+    log(`Start requested but already active (${where})`);
     return;
   }
   if (!capture) {
@@ -248,7 +248,6 @@ async function becomeLeader(): Promise<void> {
     server = await startMcpServer(env);
     role = 'leader';
     log(`Leader: MCP server listening at ${server.url}`);
-    vscode.window.showInformationMessage(`Debug MCP running at ${server.url} (leader)`);
     if (extensionContext) {
       void offerInstall(extensionContext, server.url);
     }
@@ -292,9 +291,6 @@ async function becomeFollower(leaderSocketPath: string): Promise<void> {
     await follower.connect();
     role = 'follower';
     log(`Follower: registered with leader at ${leaderSocketPath}`);
-    vscode.window.showInformationMessage(
-      `Debug MCP joined as follower. Workspace "${ownWorkspace.name}" is reachable via the leader window.`
-    );
 
     follower.on('disconnected', () => {
       log('Follower: leader disconnected. Attempting promotion…');
