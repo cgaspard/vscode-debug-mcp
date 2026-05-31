@@ -13,7 +13,7 @@ Capabilities:
 
 Two surfaces in one extension:
 
-1. **MCP server (Streamable HTTP)** — for Claude Code, Cursor, and any other MCP client.
+1. **MCP server (per-window, over a local socket)** — for Claude Code, Cursor, and any other MCP client. Each VS Code window runs its own server on a private Unix domain socket (named pipe on Windows); there is no shared TCP port.
 2. **Language Model Tools** — for GitHub Copilot Chat agent mode. No MCP setup needed; Copilot picks them up automatically once the extension is installed.
 
 ## Install
@@ -57,37 +57,34 @@ Once installed, Copilot's agent mode sees the tools immediately — no configura
 
 When the extension activates and detects that Claude Code (`anthropic.claude-code`) is installed, it offers to set things up.
 
-**The MCP scope is your choice:**
+**One registration, every workspace.** The installer registers a single **stdio** server named `vscode-debug` at user scope (in `~/.claude.json`). It points Claude Code at a small bridge that resolves the *current* window's socket at spawn time, so the same entry works in every workspace you open — there is no per-project `.mcp.json` to manage and no scope to pick. The only choice the installer asks about is whether to also install the usage skill.
 
-- **This workspace** — writes `.mcp.json` in the project root. Shared with collaborators via git. Available only in this repo.
-- **User settings (all projects)** — runs `claude mcp add --scope user` so `vscode-debug` is registered in `~/.claude.json` and works in **every workspace** you open. Personal to you, not shared with the team.
+**The skill is installed globally** at `~/.claude/skills/debug-mcp/SKILL.md`. It's generic guidance (no project-specific content) and Claude Code only auto-loads it when the conversation context matches (debugging, breakpoints, runtime state, etc.) — so a global install doesn't pollute unrelated conversations. The skill teaches Claude to prefer `launch.json` / tasks over raw `Bash`, and how to sequence breakpoint/stack/scope drill-downs.
 
-**The skill is always installed globally** at `~/.claude/skills/debug-mcp/SKILL.md`, regardless of which MCP scope you picked. It's generic guidance (no project-specific content) and Claude Code only auto-loads it when the conversation context matches (debugging, breakpoints, runtime state, etc.) — so a global install doesn't pollute unrelated conversations. The skill teaches Claude to prefer `launch.json` / tasks over raw `Bash`, how to sequence breakpoint/stack/scope drill-downs, and how to call `list_workspaces` / `bind_workspace` in multi-window setups.
+**Self-healing across updates.** The bridge lives inside the extension's install directory, whose path changes on every version bump. On activation the extension checks whether your `vscode-debug` registration points at the current build and silently re-points it if not — so updates don't break the integration. Upgrading from an older HTTP-based version replaces the old entry in place under the same `vscode-debug` name, so the `mcp__vscode-debug__*` tool prefix (and any skills/allowlists referencing it) keep working.
 
 **When the prompt re-fires:**
 
 - ✅ User-scope MCP is configured → no prompt, anywhere
-- ✅ This workspace's `.mcp.json` already has `vscode-debug` → no prompt
-- ⚠️ Neither is configured → prompts on activation, every workspace where you don't have a config
+- ⚠️ Not configured → prompts on activation
 - ❌ You picked "Don't ask again" → never prompts until you run **Debug MCP: Reset Install Prompt**
 
-You can re-open the picker any time:
+You can re-open the installer any time:
 
 > **Cmd/Ctrl+Shift+P → Debug MCP: Install Claude Code Support…**
 
-Or, click the **`$(debug-alt) MCP`** indicator in the status bar for a menu with install, copy URL, start/stop, check-for-updates, and other actions.
+Or, click the **`$(debug-alt) Debug MCP`** indicator in the status bar for a menu with install, start/stop, check-for-updates, and other actions.
 
-**Uninstall:** **Debug MCP: Uninstall Claude Code Support…** opens a multi-select picker letting you remove the user-scope registration, the current workspace's `.mcp.json` entry, and/or the global skill. The extension also performs a best-effort skill cleanup on `deactivate()` (when you uninstall the extension itself).
+**Uninstall:** **Debug MCP: Uninstall Claude Code Support…** opens a multi-select picker letting you remove the user-scope registration and/or the global skill. The extension also performs a best-effort skill cleanup on `deactivate()` (when you uninstall the extension itself).
 
-If you'd rather configure manually:
+If you'd rather configure manually, register the bridge at user scope (one entry works everywhere):
 
 ```bash
-# In the current project (project scope, .mcp.json):
-claude mcp add --transport http vscode-debug http://127.0.0.1:6736/mcp
-
-# Or for all your projects (user scope, ~/.claude.json):
-claude mcp add --scope user --transport http vscode-debug http://127.0.0.1:6736/mcp
+claude mcp add-json --scope user vscode-debug \
+  '{"type":"stdio","command":"node","args":["<path-to-extension>/out/bridge.js"]}'
 ```
+
+Replace `<path-to-extension>` with the extension's install directory (the **Install Claude Code Support…** command fills this in for you, using the exact Node that runs VS Code).
 
 ## The most common workflow: user-started debug sessions
 
@@ -101,90 +98,59 @@ The bundled `debug-mcp` skill teaches the AI to do this check first before consi
 
 ## Architecture
 
-There is **one MCP server per machine**, not per VS Code window. The first window to start binds the HTTP port and becomes the **leader**; subsequent windows become **followers** that join the leader over a local Unix-domain socket and contribute their own workspace to the cluster.
+**One MCP server per VS Code window.** Each window binds its own Unix domain socket (a named pipe on Windows), named deterministically from the workspace folder. There is no shared TCP port, and no coordination between windows — each window is independently addressable.
+
+Claude Code reaches the right window through a tiny **stdio bridge** that it spawns as a subprocess. The bridge figures out which workspace it belongs to (from `CLAUDE_PROJECT_DIR`, which Claude Code sets to the project root), computes the same socket name the extension used, and relays raw JSON-RPC bytes between Claude Code's stdin/stdout and the window's socket. Because `claude` runs in the context of one window, the process tree pins each session to the correct window automatically.
 
 ```
-                     ┌────────────────────────────────────────────┐
-                     │     MCP client (Claude Code / Copilot /    │
-                     │              Cursor / Windsurf)            │
-                     └───────────────────┬────────────────────────┘
-                                         │  Streamable HTTP
-                                         │  http://127.0.0.1:6736/mcp
-                                         ▼
-  ┌──────────────────────────────────────────────────────────────────────┐
-  │  VS Code Window A   ← LEADER                                         │
-  │  ───────────────────────────────────────                             │
-  │  • Owns HTTP server on port 6736                                     │
-  │  • Owns IPC socket at $TMPDIR/vscode-debug-mcp-<pid>.sock            │
-  │  • Owns workspace A (id = sha256(path)[:12])                         │
-  │  • Routes inbound tool calls to the correct workspace                │
-  │  • Exposes GET /cluster so other windows can discover it             │
-  └─────────┬──────────────────────────────────────────────┬─────────────┘
-            │ IPC (line-delimited JSON over Unix socket)   │
-            │                                              │
-    ┌───────▼─────────────────────┐         ┌──────────────▼──────────────┐
-    │  VS Code Window B           │         │  VS Code Window C           │
-    │   ← FOLLOWER                │         │   ← FOLLOWER                │
-    │  • Workspace B              │         │  • Workspace C              │
-    │  • Tool calls forwarded     │         │  • Tool calls forwarded     │
-    │    from leader              │         │    from leader              │
-    └─────────────────────────────┘         └─────────────────────────────┘
+   VS Code Window A                         VS Code Window B
+  ┌────────────────────────────┐           ┌────────────────────────────┐
+  │  extension host            │           │  extension host            │
+  │  • MCP server (full tool   │           │  • MCP server              │
+  │    schemas, vscode.debug.*)│           │  • workspace B             │
+  │  • listens on UDS:         │           │  • listens on UDS:         │
+  │    …/vscode-debug-mcp-     │           │    …/vscode-debug-mcp-     │
+  │    <hash(pathA)>.sock      │           │    <hash(pathB)>.sock      │
+  └─────────────▲──────────────┘           └─────────────▲──────────────┘
+                │ JSON-RPC over socket                   │
+        ┌───────┴────────┐                       ┌───────┴────────┐
+        │  bridge.js     │                       │  bridge.js     │
+        │  (stdio↔socket)│                       │  (stdio↔socket)│
+        └───────▲────────┘                       └───────▲────────┘
+                │ stdio                                  │ stdio
+     ┌──────────┴──────────┐                  ┌──────────┴──────────┐
+     │ claude (in window A)│                  │ claude (in window B)│
+     └─────────────────────┘                  └─────────────────────┘
 ```
 
-**Discovery (no lockfile)**
+**Socket naming**
 
-1. Window starts → tries `httpServer.listen(6736)`
-2. **Success** → it becomes the leader. Done.
-3. **`EADDRINUSE`** → it GETs `http://127.0.0.1:6736/cluster`
-   - Responder identifies as Debug MCP → it connects to the advertised Unix socket as a follower
-   - Anything else → clear error: *"Port 6736 is in use by another process that is not a Debug MCP server."*
+Each window listens at `$TMPDIR/vscode-debug-mcp/<id>.sock` where `<id> = sha256(workspace_path).slice(0, 12)` (on Windows, `\\.\pipe\vscode-debug-mcp-<id>`). The bridge computes the identical name from `CLAUDE_PROJECT_DIR`, so discovery needs no config and no central registry in the common case.
 
-The leader's HTTP `/cluster` endpoint is the single source of truth. If the leader crashes hard, its port frees and the next window to call `startServer` naturally becomes the new leader.
+**Bridge socket resolution order**
 
-**Workspace routing**
+1. `$VSCODE_DEBUG_MCP_SOCK` if set (explicit override).
+2. The deterministic path from `$CLAUDE_PROJECT_DIR` (or the bridge's cwd) — the common case.
+3. A per-user registry at `~/.claude/vscode-debug/registry.json` mapping `workspacePath → socketPath`, written by each window. This covers multi-root workspaces, `.code-workspace` files, and the rare case of the same folder open in two windows (where the second window falls back to a pid-disambiguated socket).
 
-The MCP server has no concept of "the current window" — clients say which workspace they want by **MCP session id**. Each chat session in an MCP client gets its own session id, and the leader maintains a `sessionId → workspaceId` map.
+**Resilience**
 
-| Step | Tool | Effect |
-| --- | --- | --- |
-| 1 | `list_workspaces` | Returns one entry per VS Code window in the cluster: `{ id, name, path }` |
-| 2 | `bind_workspace(workspaceId)` | The leader maps the current MCP session to that workspace. Subsequent tool calls in this session are routed to that window. |
-| 3 | `start_debugging`, `set_breakpoint`, etc. | Executed in the leader if `workspaceId == leader.workspace.id`; forwarded over IPC to the matching follower otherwise. |
-
-Without a binding, calls default to the leader's workspace. The bundled debug-mcp skill teaches the AI to call `list_workspaces`/`bind_workspace` at the start of multi-window sessions.
-
-Workspace ids are `sha256(absolute_path).slice(0, 12)` — stable across restarts and window-title changes.
-
-**Failover**
-
-When a follower's heartbeat to the leader times out, the follower drops back to "no role" and retries the discovery flow. Since the leader's port has freed, the follower's `listen(6736)` succeeds and it becomes the new leader. Other followers (if any) detect the same heartbeat loss and re-discover, finding the new leader.
+The bridge keeps Claude Code's session alive across window reloads: if the socket drops (e.g. you reload the VS Code window), the bridge transparently retries the connection rather than exiting. Stdio MCP servers aren't auto-restarted by Claude Code, so this self-reconnect is what makes a reload non-fatal.
 
 **Status bar**
 
-| Role | Status bar text |
+| State | Status bar text |
 | --- | --- |
-| Leader | `$(debug-alt) MCP :6736 (leader)` |
-| Follower | `$(debug-alt) MCP (follower)` |
-| Standalone (single-window setup) | `$(debug-alt) MCP :6736` |
+| Running | `$(debug-alt) Debug MCP` |
 | Stopped | `$(debug-alt) MCP off` |
 
-Click the indicator for a context-aware action menu — install/reconfigure Claude Code, copy URL, start/stop, check for updates, open log.
-
-## MCP transport
-
-Streamable HTTP at `http://127.0.0.1:6736/mcp` by default. Port, host, and auto-start are configurable under **VS Code Debug MCP** settings.
-
-If the configured port is held by something **other** than a Debug MCP leader (e.g. a different app already grabbed 6736), startup fails with a clear "port held by another process" message instead of a raw `EADDRINUSE`. Change `vscodeDebugMcp.port` in settings to work around it.
+Click the indicator for a context-aware action menu — install/reconfigure Claude Code, start/stop, check for updates, open log.
 
 ## Tools exposed (MCP names; Copilot uses `debugMcp_` prefix)
 
 ### Sessions (works for **user-started** sessions too!)
 - `list_debug_sessions` — every active or recently terminated debug session, with status (`running`/`paused`/`terminated`) and a snapshot of the most recent stopped event when present. **The AI should call this first** when the user mentions runtime behavior — they may already be paused at a breakpoint.
 - `get_last_stopped_event(sessionId?, levels?)` — snapshot of the most recent pause: `{ reason, threadId, frame, stackTrace }`. Survives the user continuing execution (snapshot is captured at pause time), so you can still read where they were stopped even after they resumed.
-
-### Multi-window
-- `list_workspaces`
-- `bind_workspace(workspaceId)`
 
 ### Launch configurations & sessions
 - `list_launch_configurations`
@@ -235,9 +201,7 @@ If `read_terminal` returns nothing for a terminal, run a command in it first —
 
 | Setting | Default | Description |
 |---|---|---|
-| `vscodeDebugMcp.port` | `6736` | HTTP port to bind |
-| `vscodeDebugMcp.host` | `127.0.0.1` | Bind interface (localhost only by default) |
-| `vscodeDebugMcp.autoStart` | `true` | Start the MCP server when the extension activates |
+| `vscodeDebugMcp.autoStart` | `true` | Start the per-window MCP server when the extension activates |
 | `vscodeDebugMcp.terminalBufferLines` | `2000` | Max lines retained per captured terminal/debug-console buffer |
 
 ## Updates
@@ -251,7 +215,7 @@ No marketplace required. Skipped versions are remembered until the next release.
 
 ## Security note
 
-The MCP server only binds to `127.0.0.1` by default and has no authentication. Don't expose it on a public interface unless you've added auth in front (e.g. via a reverse proxy or SSH tunnel).
+The MCP server listens on a **Unix domain socket** (a named pipe on Windows), not a network port, so it is reachable only by processes on the same machine running as the same user — the socket file is created under the user's temp directory. There is no network listener to expose. The bridge that Claude Code spawns connects to that local socket and relays JSON-RPC; it opens no ports of its own.
 
 ## License
 

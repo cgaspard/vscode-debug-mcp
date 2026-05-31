@@ -1,13 +1,5 @@
-import * as vscode from 'vscode';
-import express, { type Request, type Response } from 'express';
-import * as http from 'http';
-import { randomUUID } from 'crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-
-import type { WorkspaceInfo, ClusterInfo } from './cluster';
 
 // Bundled at build time; esbuild inlines the JSON.
 import { version as PACKAGE_VERSION } from '../package.json';
@@ -31,43 +23,45 @@ function errorResult(err: unknown) {
   };
 }
 
-/**
- * The shape the MCP server expects from its hosting environment. The
- * hosting code is responsible for routing dispatch() to either the local
- * window or another window's follower over the cluster IPC.
- */
-export interface MCPServerEnv {
-  /** Run a tool against a specific workspace. */
-  dispatch(workspaceId: string | undefined, tool: string, args: any): Promise<unknown>;
-  /** List all known workspaces in the cluster. */
-  listWorkspaces(): WorkspaceInfo[];
-  /** The workspace ID to use when no binding has been made yet. */
-  defaultWorkspaceId(): string;
-  /** Info served at GET /cluster so other windows can discover us. */
-  getClusterInfo(): ClusterInfo;
+/** Workspace identity for the single window this server serves. */
+export interface WorkspaceInfo {
+  id: string;
+  name: string;
+  path: string;
 }
 
-function buildMcpServer(env: MCPServerEnv, sessionWorkspace: Map<string, string>, sessionId: () => string | undefined): McpServer {
+/**
+ * The shape the MCP server expects from its hosting environment. There is no
+ * cross-window routing any more: each VS Code window runs its own server and
+ * every dispatch resolves locally. The workspaceId argument is vestigial and
+ * always ignored — kept only so the dispatch signature stays stable.
+ */
+export interface MCPServerEnv {
+  dispatch(workspaceId: string | undefined, tool: string, args: any): Promise<unknown>;
+  listWorkspaces(): WorkspaceInfo[];
+  defaultWorkspaceId(): string;
+}
+
+/**
+ * Build the MCP server for this window. `sessionWorkspace`/`sessionId` are
+ * accepted for call-site compatibility but unused — there is nothing to demux
+ * in the single-window model.
+ */
+export function buildMcpServer(env: MCPServerEnv, _sessionWorkspace?: Map<string, string>, _sessionId?: () => string | undefined): McpServer {
   const server = new McpServer(
     { name: 'vscode-debug-mcp', version: PACKAGE_VERSION },
     { capabilities: { tools: {}, logging: {} } }
   );
 
-  const currentWorkspace = (): string | undefined => {
-    const sid = sessionId();
-    if (sid && sessionWorkspace.has(sid)) return sessionWorkspace.get(sid);
-    return env.defaultWorkspaceId();
-  };
-
-  const tool = (
+  // Every tool dispatches to the local window.
+  const forwarded = (
     name: string,
     description: string,
-    schema: z.ZodRawShape,
-    handler: (args: any) => Promise<unknown> | unknown
+    schema: z.ZodRawShape
   ) => {
     (server.tool as any)(name, description, schema, async (args: any) => {
       try {
-        const result = await handler(args);
+        const result = await env.dispatch(undefined, name, args);
         return jsonResult(result ?? { ok: true });
       } catch (err) {
         return errorResult(err);
@@ -75,43 +69,7 @@ function buildMcpServer(env: MCPServerEnv, sessionWorkspace: Map<string, string>
     });
   };
 
-  // Forwarded tool: routes to the workspace bound to this MCP session.
-  const forwarded = (
-    name: string,
-    description: string,
-    schema: z.ZodRawShape
-  ) => {
-    tool(name, description, schema, async (args: any) => {
-      return env.dispatch(currentWorkspace(), name, args);
-    });
-  };
-
-  // ---------- Multi-window workspace tools ----------
-  tool(
-    'list_workspaces',
-    'List all VS Code workspaces currently registered with this Debug MCP cluster (across all open windows). Each workspace has a stable id (sha256 hash slice of its path), a name (folder basename), and an absolute path. Use this when the user has multiple VS Code windows open to discover which one you should target.',
-    {},
-    () => env.listWorkspaces()
-  );
-
-  tool(
-    'bind_workspace',
-    'Bind this MCP chat session to a specific VS Code workspace by id (from list_workspaces). All subsequent tool calls in this session will be routed to that workspace. If you never call this, calls go to the leader window\'s workspace by default. Call this once at the start of a multi-window session, or any time the user asks you to switch windows.',
-    { workspaceId: z.string() },
-    ({ workspaceId }: { workspaceId: string }) => {
-      const workspaces = env.listWorkspaces();
-      if (!workspaces.some((w) => w.id === workspaceId)) {
-        throw new Error(`Unknown workspace id: ${workspaceId}. Run list_workspaces to see available ids.`);
-      }
-      const sid = sessionId();
-      if (!sid) throw new Error('No MCP session id available; cannot bind.');
-      sessionWorkspace.set(sid, workspaceId);
-      const match = workspaces.find((w) => w.id === workspaceId)!;
-      return { bound: true, workspace: match };
-    }
-  );
-
-  // ---------- Forwarded tools ----------
+  // ---------- Tools ----------
   // Sessions (covers BOTH user-started and AI-started sessions)
   forwarded(
     'list_debug_sessions',
@@ -207,135 +165,4 @@ function buildMcpServer(env: MCPServerEnv, sessionWorkspace: Map<string, string>
   });
 
   return server;
-}
-
-export interface RunningServer {
-  url: string;
-  port: number;
-  host: string;
-  stop(): Promise<void>;
-}
-
-export async function startMcpServer(env: MCPServerEnv): Promise<RunningServer> {
-  const cfg = vscode.workspace.getConfiguration('vscodeDebugMcp');
-  const port = cfg.get<number>('port', 6736);
-  const host = cfg.get<string>('host', '127.0.0.1');
-
-  const app = express();
-  app.use(express.json({ limit: '4mb' }));
-
-  const transports = new Map<string, StreamableHTTPServerTransport>();
-  // Session-id (string) -> bound workspace id (string).
-  const sessionWorkspace = new Map<string, string>();
-
-  app.post('/mcp', async (req: Request, res: Response) => {
-    try {
-      const sessionId = req.header('mcp-session-id');
-      let transport: StreamableHTTPServerTransport | undefined;
-
-      if (sessionId && transports.has(sessionId)) {
-        transport = transports.get(sessionId);
-      } else if (!sessionId && isInitializeRequest(req.body)) {
-        const newTransport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: () => randomUUID(),
-          onsessioninitialized: (id) => {
-            transports.set(id, newTransport);
-          }
-        });
-        newTransport.onclose = () => {
-          if (newTransport.sessionId) {
-            transports.delete(newTransport.sessionId);
-            sessionWorkspace.delete(newTransport.sessionId);
-          }
-        };
-        const mcp = buildMcpServer(env, sessionWorkspace, () => newTransport.sessionId);
-        await mcp.connect(newTransport);
-        transport = newTransport;
-      } else {
-        res.status(400).json({
-          jsonrpc: '2.0',
-          error: { code: -32000, message: 'Bad Request: no valid session ID' },
-          id: null
-        });
-        return;
-      }
-
-      await transport!.handleRequest(req, res, req.body);
-    } catch (err) {
-      if (!res.headersSent) {
-        res.status(500).json({
-          jsonrpc: '2.0',
-          error: { code: -32603, message: err instanceof Error ? err.message : String(err) },
-          id: null
-        });
-      }
-    }
-  });
-
-  const sessionRouter = async (req: Request, res: Response) => {
-    const sessionId = req.header('mcp-session-id');
-    const transport = sessionId ? transports.get(sessionId) : undefined;
-    if (!transport) {
-      res.status(400).send('Invalid or missing session ID');
-      return;
-    }
-    await transport.handleRequest(req, res);
-  };
-
-  app.get('/mcp', sessionRouter);
-  app.delete('/mcp', sessionRouter);
-
-  app.get('/', (_req: Request, res: Response) => {
-    res.json({ name: 'vscode-debug-mcp', endpoint: '/mcp', transport: 'streamable-http' });
-  });
-
-  app.get('/cluster', (_req: Request, res: Response) => {
-    res.json(env.getClusterInfo());
-  });
-
-  const httpServer = http.createServer(app);
-
-  // MCP's Streamable HTTP transport keeps a long-lived SSE stream open on
-  // GET /mcp with no application-level keepalive. Node's defaults
-  // (requestTimeout=5min, headersTimeout=1min) and the OS TCP idle-drop
-  // (~15min on macOS) will tear that stream down between tool calls.
-  // Disable the per-request idle timeouts and enable TCP keepalive on every
-  // accepted socket so the connection survives long idle periods.
-  httpServer.requestTimeout = 0;
-  httpServer.headersTimeout = 0;
-  httpServer.keepAliveTimeout = 0;
-  httpServer.timeout = 0;
-  httpServer.on('connection', (socket) => {
-    socket.setKeepAlive(true, 30_000);
-    socket.setTimeout(0);
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    const onError = (err: Error) => reject(err);
-    httpServer.once('error', onError);
-    httpServer.listen(port, host, () => {
-      httpServer.off('error', onError);
-      resolve();
-    });
-  });
-
-  const url = `http://${host}:${port}/mcp`;
-
-  return {
-    url,
-    port,
-    host,
-    async stop() {
-      for (const t of transports.values()) {
-        try {
-          await t.close();
-        } catch {
-          /* ignore */
-        }
-      }
-      transports.clear();
-      sessionWorkspace.clear();
-      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
-    }
-  };
 }

@@ -3,12 +3,13 @@ import { CaptureManager } from './capture';
 import { debugOps } from './debugOps';
 import { listTasks, runTask, listRunningTasks, stopTask } from './tasks';
 
-// One source of truth for all tool implementations. Both the MCP server
-// (mcpServer.ts) and the cluster IPC layer (cluster.ts) dispatch to these.
+// One source of truth for all tool implementations. The MCP server
+// (mcpServer.ts, via the per-window UDS listener in udsServer.ts) and the
+// VS Code Language Model tools (lmTools.ts) both dispatch to these.
 //
-// Tools that mutate or read live VS Code state can only run inside the
-// window where the corresponding workspace lives. The cluster layer
-// arranges that by forwarding requests to the right follower.
+// Tools that mutate or read live VS Code state run inside the window that
+// owns this extension host — which is exactly where each window's socket
+// lives, so there is no cross-window routing to arrange.
 
 export type Tool = (args: any) => Promise<unknown> | unknown;
 

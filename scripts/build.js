@@ -8,15 +8,11 @@ const path = require('path');
 const watch = process.argv.includes('--watch');
 const production = process.argv.includes('--production') || process.env.NODE_ENV === 'production';
 
-const config = {
-  entryPoints: [path.resolve(__dirname, '..', 'src', 'extension.ts')],
+const shared = {
   bundle: true,
-  outfile: path.resolve(__dirname, '..', 'out', 'extension.js'),
   platform: 'node',
   target: 'node20',
   format: 'cjs',
-  // vscode is provided by the host at runtime and must never be bundled.
-  external: ['vscode'],
   sourcemap: !production,
   minify: production,
   // Preserve original names in stack traces — extensions are small enough
@@ -25,13 +21,35 @@ const config = {
   logLevel: 'info'
 };
 
+const extensionConfig = {
+  ...shared,
+  entryPoints: [path.resolve(__dirname, '..', 'src', 'extension.ts')],
+  outfile: path.resolve(__dirname, '..', 'out', 'extension.js'),
+  // vscode is provided by the host at runtime and must never be bundled.
+  external: ['vscode']
+};
+
+// Standalone stdio<->socket bridge spawned by `claude`. No vscode dependency —
+// it runs as a plain Node subprocess outside the extension host.
+const bridgeConfig = {
+  ...shared,
+  entryPoints: [path.resolve(__dirname, '..', 'src', 'bridge.ts')],
+  outfile: path.resolve(__dirname, '..', 'out', 'bridge.js')
+};
+
 async function run() {
   if (watch) {
-    const ctx = await esbuild.context(config);
-    await ctx.watch();
+    const ctxs = await Promise.all([
+      esbuild.context(extensionConfig),
+      esbuild.context(bridgeConfig)
+    ]);
+    await Promise.all(ctxs.map((c) => c.watch()));
     console.log('esbuild: watching for changes…');
   } else {
-    await esbuild.build(config);
+    await Promise.all([
+      esbuild.build(extensionConfig),
+      esbuild.build(bridgeConfig)
+    ]);
   }
 }
 

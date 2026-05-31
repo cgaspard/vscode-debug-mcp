@@ -46,10 +46,6 @@ A richer snapshot of the most recent pause for a session: `{ reason, threadId, f
 - **`list_debug_sessions`** — see what's happening. Call first.
 - **`get_last_stopped_event(sessionId?, levels?)`** — read where execution stopped most recently, with stack trace.
 
-### Multi-window (when the user has multiple VS Code windows open)
-- `list_workspaces` — list all VS Code windows registered with the cluster.
-- `bind_workspace(workspaceId)` — lock this MCP chat session to a specific workspace. Call once at the start.
-
 ### Inspect runtime state (the session must be paused)
 - `get_threads` — list threads in the active session.
 - `get_stack_trace(threadId?, levels?)` — frames from top of stack down. Defaults to the first thread.
@@ -114,14 +110,6 @@ Not a debug session — use tasks instead.
 1. `list_tasks` to find their task.
 2. `run_task(name, source?)`. The task's output appears in a VS Code terminal that the user can see and stop from the task panel.
 3. `read_terminal` to pull output. Don't `Bash npm start &` — backgrounded shell processes get orphaned.
-
-### Multi-window: which window do you target?
-
-If `list_workspaces` returns more than one entry, the user has multiple VS Code windows open and you must pick one before running session-targeting tools:
-
-- Match file paths the user has mentioned/selected against `workspaces[].path`.
-- `bind_workspace(workspaceId)` to lock the choice for this chat session.
-- If you're unsure, ask.
 
 ## Gotchas
 

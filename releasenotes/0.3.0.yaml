@@ -1,0 +1,18 @@
+version: 0.3.0
+date: 2026-05-30
+highlights:
+  - Each VS Code window now runs its own MCP server on a private Unix socket — no more shared TCP port and no leader/follower coordination between windows. Claude Code reaches the right window automatically.
+  - Claude Code is now wired up over a stdio bridge instead of an HTTP URL. One user-scope registration works in every workspace; the extension self-heals the registration across updates.
+added:
+  - Per-window MCP server over a Unix domain socket (named pipe on Windows), derived deterministically from the workspace folder so each window is independently addressable.
+  - A small stdio bridge (out/bridge.js) that Claude Code spawns and that connects to the current window's socket. It resolves its workspace from CLAUDE_PROJECT_DIR, retries transparently if the window is reloading, and falls back to a per-user registry for multi-root or same-folder-twice cases.
+  - The Claude Code installer self-heals: on activation it re-points an existing vscode-debug registration at the current build if the bridge path is stale (e.g. after an extension update).
+changed:
+  - The Claude Code installer now registers a single stdio server named "vscode-debug" at user scope. The tool prefix (mcp__vscode-debug__*) is unchanged, so existing skills, prompts, and permission allowlists keep working. An existing HTTP "vscode-debug" entry is replaced in place on next activation.
+  - The scope picker is gone — one user-scope entry works in every window, so there's no per-project .mcp.json to manage.
+  - The status bar and menu reflect the single-window model; the express dependency is dropped, shrinking the bundle by roughly 60%.
+fixed: []
+removed:
+  - The HTTP/Streamable-HTTP MCP server and the cross-window leader/follower coordination layer.
+  - The bind_workspace and list_workspaces tools — with one server per window there is nothing to demux.
+  - The vscodeDebugMcp.port and vscodeDebugMcp.host settings (no TCP port is bound any more).

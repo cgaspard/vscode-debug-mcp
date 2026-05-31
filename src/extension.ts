@@ -1,42 +1,40 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { CaptureManager } from './capture';
-import { startMcpServer, type RunningServer, type MCPServerEnv } from './mcpServer';
+import { type MCPServerEnv } from './mcpServer';
 import {
   offerInstall,
+  registerStdioBridge,
   resetInstallPromptFlag,
   getConfigState,
   claudeCodeInstalled,
   uninstallClaudeCodeSupport,
   deactivateCleanup,
-  refreshSkillIfInstalled
+  refreshSkillIfInstalled,
+  isStdioBridgeStale
 } from './firstRun';
 import { registerLmTools } from './lmTools';
+import { startUdsServer, type RunningUdsServer, workspaceIdFor } from './udsServer';
 import { checkForUpdate } from './updater';
 import { buildLocalToolHandlers, type Tool } from './toolHandlers';
 import { SessionRegistry } from './sessionRegistry';
 import { setSessionRegistry } from './debugOps';
-import {
-  Leader,
-  Follower,
-  probeLeaderHttp,
-  workspaceIdFor,
-  type WorkspaceInfo
-} from './cluster';
 
 let capture: CaptureManager | undefined;
 let sessionRegistry: SessionRegistry | undefined;
-let server: RunningServer | undefined;
+let server: RunningUdsServer | undefined;
 let statusBar: vscode.StatusBarItem | undefined;
 let output: vscode.OutputChannel | undefined;
 let extensionContext: vscode.ExtensionContext | undefined;
-
-let role: 'leader' | 'follower' | 'standalone' = 'standalone';
-let leader: Leader | undefined;
-let follower: Follower | undefined;
 let localHandlers: Record<string, Tool> | undefined;
-let ownWorkspace: WorkspaceInfo | undefined;
 
-function computeOwnWorkspace(): WorkspaceInfo {
+interface OwnWorkspace {
+  id: string;
+  name: string;
+  path: string;
+}
+
+function computeOwnWorkspace(): OwnWorkspace {
   const folder = vscode.workspace.workspaceFolders?.[0];
   const absPath = folder?.uri.fsPath ?? `<no-workspace:${process.pid}>`;
   const name = folder?.name ?? `(no workspace, pid ${process.pid})`;
@@ -58,21 +56,66 @@ function log(msg: string) {
 
 function updateStatusBar() {
   if (!statusBar) return;
-  if (role === 'leader' && server) {
-    statusBar.text = `$(debug-alt) MCP :${server.port} (leader)`;
-    statusBar.tooltip = `Debug MCP leader — MCP server at ${server.url}\nThis window owns the MCP server; other VS Code windows connect to this one.\nClick for actions.`;
-  } else if (role === 'follower') {
-    statusBar.text = '$(debug-alt) MCP (follower)';
-    statusBar.tooltip = 'Debug MCP follower — registered with the leader window.\nThe leader serves MCP at the configured port; this window\'s workspace is reachable through it.\nClick for actions.';
-  } else if (role === 'standalone' && server) {
-    statusBar.text = `$(debug-alt) MCP :${server.port}`;
-    statusBar.tooltip = `Debug MCP server running at ${server.url}\nClick for actions.`;
+  if (server) {
+    statusBar.text = '$(debug-alt) Debug MCP';
+    statusBar.tooltip =
+      `Debug MCP listening for this window at\n${server.socketPath}\n` +
+      `Claude Code reaches it via the stdio bridge.\nClick for actions.`;
   } else {
     statusBar.text = '$(debug-alt) MCP off';
     statusBar.tooltip = 'Debug MCP is stopped. Click for actions.';
   }
   statusBar.command = 'vscodeDebugMcp.showMenu';
   statusBar.show();
+}
+
+/**
+ * Start the per-window MCP server. Each VS Code window binds its OWN Unix
+ * socket (named from its workspace folder), so there is no shared port and no
+ * leader/follower routing — every tool call resolves to THIS window. A stdio
+ * bridge that `claude` spawns connects to this window's socket.
+ */
+async function startServer() {
+  if (server) {
+    log(`Start requested but already listening at ${server.socketPath}`);
+    return;
+  }
+  if (!capture) {
+    capture = new CaptureManager(() =>
+      vscode.workspace.getConfiguration('vscodeDebugMcp').get<number>('terminalBufferLines', 2000)
+    );
+  }
+  const own = computeOwnWorkspace();
+  const env: MCPServerEnv = {
+    dispatch: (_workspaceId, tool, args) => Promise.resolve(runLocalTool(tool, args)),
+    listWorkspaces: () => [own],
+    defaultWorkspaceId: () => own.id
+  };
+  try {
+    server = await startUdsServer(env, own.path);
+    log(`MCP server listening at ${server.socketPath}`);
+    if (extensionContext) {
+      void offerInstall(extensionContext);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`Failed to start MCP server: ${msg}`);
+    vscode.window.showErrorMessage(`Failed to start Debug MCP: ${msg}`);
+  }
+  updateStatusBar();
+}
+
+async function stopServer() {
+  if (server) {
+    try {
+      await server.stop();
+      log('MCP server stopped.');
+    } catch (err) {
+      log(`Error stopping server: ${err instanceof Error ? err.message : err}`);
+    }
+    server = undefined;
+  }
+  updateStatusBar();
 }
 
 async function showStatusBarMenu() {
@@ -84,47 +127,31 @@ async function showStatusBarMenu() {
 
   if (server) {
     items.push({
-      id: 'copyUrl',
-      label: '$(clippy) Copy server URL',
-      description: server.url
-    });
-  } else if (role === 'follower') {
-    items.push({
-      id: 'info',
-      label: '$(link) Following leader window',
-      description: `Workspace "${ownWorkspace?.name ?? '?'}" is reachable via the leader's MCP server`
+      id: 'showInfo',
+      label: '$(info) Show connection info',
+      description: server.socketPath
     });
   } else {
     items.push({
       id: 'start',
       label: '$(play) Start MCP server',
-      description: 'Bind the local HTTP server (or join an existing leader)'
+      description: 'Bind this window\'s socket'
     });
   }
 
   if (hasClaude) {
-    if (!state.userConfigured && !state.workspaceConfigured) {
+    if (!state.userConfigured) {
       items.push({
         id: 'install',
         label: '$(rocket) Install Claude Code support…',
-        description: 'Not yet configured — register the MCP server and (optionally) the usage skill'
+        description: 'Register the stdio bridge and (optionally) the usage skill'
       });
     } else {
-      const tags: string[] = [];
-      if (state.workspaceConfigured) tags.push('workspace');
-      if (state.userConfigured) tags.push('user');
       items.push({
         id: 'install',
         label: '$(gear) Reconfigure Claude Code support…',
-        description: `Already configured at ${tags.join(' + ')} scope — re-run to change scope or refresh skill`
+        description: 'Already configured — re-run to refresh the bridge registration or skill'
       });
-      if (!state.userConfigured) {
-        items.push({
-          id: 'installGlobal',
-          label: '$(globe) Make it global (all projects)…',
-          description: 'Register at user scope (~/.claude/settings.json) so it works in every workspace'
-        });
-      }
     }
   } else {
     items.push({
@@ -136,14 +163,9 @@ async function showStatusBarMenu() {
 
   if (server) {
     items.push({
-      id: 'showInfo',
-      label: '$(info) Show connection info',
-      description: 'Print the server URL'
-    });
-    items.push({
       id: 'stop',
       label: '$(debug-stop) Stop MCP server',
-      description: 'Tear down the local HTTP server'
+      description: 'Tear down this window\'s socket'
     });
   }
 
@@ -159,15 +181,12 @@ async function showStatusBarMenu() {
   });
 
   const pick = await vscode.window.showQuickPick(items, {
-    title: server ? `Debug MCP (running at ${server.url})` : 'Debug MCP (stopped)',
+    title: server ? 'Debug MCP (running)' : 'Debug MCP (stopped)',
     placeHolder: 'Pick an action'
   });
   if (!pick) return;
 
   switch (pick.id) {
-    case 'copyUrl':
-      await vscode.commands.executeCommand('vscodeDebugMcp.copyUrl');
-      break;
     case 'start':
       await startServer();
       break;
@@ -175,10 +194,6 @@ async function showStatusBarMenu() {
       await stopServer();
       break;
     case 'install':
-      await vscode.commands.executeCommand('vscodeDebugMcp.configureClaudeCode');
-      break;
-    case 'installGlobal':
-      // Same picker as install — the user just selects "User settings" inside it.
       await vscode.commands.executeCommand('vscodeDebugMcp.configureClaudeCode');
       break;
     case 'showInfo':
@@ -193,149 +208,7 @@ async function showStatusBarMenu() {
     case 'checkUpdate':
       await vscode.commands.executeCommand('vscodeDebugMcp.checkForUpdates');
       break;
-    case 'info':
-      // No-op informational item.
-      break;
   }
-}
-
-async function startServer() {
-  if (server || role === 'follower') {
-    const where = server ? server.url : 'leader window';
-    log(`Start requested but already active (${where})`);
-    return;
-  }
-  if (!capture) {
-    capture = new CaptureManager(() =>
-      vscode.workspace.getConfiguration('vscodeDebugMcp').get<number>('terminalBufferLines', 2000)
-    );
-  }
-  if (!ownWorkspace) ownWorkspace = computeOwnWorkspace();
-
-  // Try to become leader first. If the port is in use, probe to see if
-  // another Debug MCP leader is running; if so, follow it.
-  await becomeLeader();
-  updateStatusBar();
-}
-
-async function becomeLeader(): Promise<void> {
-  if (!ownWorkspace) ownWorkspace = computeOwnWorkspace();
-  // Set up the cluster IPC server first so it's ready before the HTTP
-  // server starts answering /cluster requests.
-  leader = new Leader(ownWorkspace, async (tool, args) => runLocalTool(tool, args));
-  try {
-    await leader.start();
-  } catch (err) {
-    leader = undefined;
-    const msg = err instanceof Error ? err.message : String(err);
-    log(`Failed to start cluster IPC: ${msg}`);
-    vscode.window.showErrorMessage(`Debug MCP cluster IPC failed: ${msg}`);
-    return;
-  }
-
-  leader.on('workspaces-changed', () => {
-    log(`Cluster workspaces: ${leader!.listWorkspaces().map((w) => w.name).join(', ')}`);
-  });
-
-  const env: MCPServerEnv = {
-    dispatch: (workspaceId, tool, args) => leader!.dispatch(workspaceId, tool, args) as Promise<unknown>,
-    listWorkspaces: () => leader!.listWorkspaces(),
-    defaultWorkspaceId: () => leader!.getOwnWorkspace().id,
-    getClusterInfo: () => leader!.getClusterInfo()
-  };
-
-  try {
-    server = await startMcpServer(env);
-    role = 'leader';
-    log(`Leader: MCP server listening at ${server.url}`);
-    if (extensionContext) {
-      void offerInstall(extensionContext, server.url);
-    }
-  } catch (err: any) {
-    if (err?.code === 'EADDRINUSE') {
-      // Port is taken — check if it's a fellow Debug MCP leader we can follow.
-      const cfg = vscode.workspace.getConfiguration('vscodeDebugMcp');
-      const port = cfg.get<number>('port', 6736);
-      const host = cfg.get<string>('host', '127.0.0.1');
-      log(`Port ${port} is in use; probing for an existing Debug MCP leader…`);
-      const info = await probeLeaderHttp(host, port);
-      // Clean up our half-built leader either way.
-      await leader.stop().catch(() => {});
-      leader = undefined;
-      if (info) {
-        log(`Found Debug MCP leader (pid ${info.pid}); joining as follower via ${info.socket}`);
-        await becomeFollower(info.socket);
-        return;
-      }
-      // No Debug MCP responder — somebody else holds the port.
-      const msg = `Port ${port} is in use by another process that is not a Debug MCP server. Stop the conflicting process or change vscodeDebugMcp.port in settings.`;
-      log(msg);
-      vscode.window.showErrorMessage(`Debug MCP: ${msg}`);
-      role = 'standalone';
-      return;
-    }
-    const msg = err instanceof Error ? err.message : String(err);
-    log(`Failed to start as leader: ${msg}`);
-    vscode.window.showErrorMessage(`Failed to start Debug MCP: ${msg}`);
-    await leader.stop().catch(() => {});
-    leader = undefined;
-  }
-}
-
-async function becomeFollower(leaderSocketPath: string): Promise<void> {
-  if (!ownWorkspace) ownWorkspace = computeOwnWorkspace();
-  try {
-    follower = new Follower(ownWorkspace, leaderSocketPath, async (tool, args) =>
-      runLocalTool(tool, args)
-    );
-    await follower.connect();
-    role = 'follower';
-    log(`Follower: registered with leader at ${leaderSocketPath}`);
-
-    follower.on('disconnected', () => {
-      log('Follower: leader disconnected. Attempting promotion…');
-      follower = undefined;
-      role = 'standalone';
-      updateStatusBar();
-      // Wait a moment then try to become the leader. If multiple
-      // followers race, only one will win the port; the others will
-      // re-discover and refollow.
-      setTimeout(() => {
-        void startServer();
-      }, 500 + Math.floor(Math.random() * 500));
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log(`Failed to attach to leader: ${msg}. Trying to become leader.`);
-    follower = undefined;
-    await becomeLeader();
-  }
-}
-
-async function stopServer() {
-  if (role === 'follower' && follower) {
-    await follower.disconnect();
-    follower = undefined;
-    role = 'standalone';
-    log('Follower: disconnected from leader.');
-    updateStatusBar();
-    return;
-  }
-  if (server) {
-    try {
-      await server.stop();
-      log('MCP server stopped.');
-    } catch (err) {
-      log(`Error stopping server: ${err instanceof Error ? err.message : err}`);
-    }
-    server = undefined;
-  }
-  if (leader) {
-    await leader.stop().catch(() => {});
-    leader = undefined;
-  }
-  role = 'standalone';
-  updateStatusBar();
 }
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -352,15 +225,7 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Debug MCP server is not running.');
         return;
       }
-      vscode.window.showInformationMessage(`Debug MCP running at ${server.url}`);
-    }),
-    vscode.commands.registerCommand('vscodeDebugMcp.copyUrl', async () => {
-      if (!server) {
-        await vscode.commands.executeCommand('vscodeDebugMcp.start');
-        return;
-      }
-      await vscode.env.clipboard.writeText(server.url);
-      vscode.window.showInformationMessage(`Copied ${server.url} to clipboard`);
+      vscode.window.showInformationMessage(`Debug MCP listening at ${server.socketPath}`);
     }),
     vscode.commands.registerCommand('vscodeDebugMcp.configureClaudeCode', async () => {
       if (!server) {
@@ -371,7 +236,7 @@ export async function activate(context: vscode.ExtensionContext) {
         if (choice === 'Start server') await startServer();
         if (!server) return;
       }
-      await offerInstall(context, server!.url, { force: true });
+      await offerInstall(context, { force: true });
     }),
     vscode.commands.registerCommand('vscodeDebugMcp.resetInstallPrompt', async () => {
       await resetInstallPromptFlag(context);
@@ -383,37 +248,28 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand('vscodeDebugMcp.uninstallClaudeCode', async () => {
       const state = await getConfigState();
-      const hasWorkspace = state.workspaceConfigured;
-      const hasUser = state.userConfigured;
-
-      if (!hasWorkspace && !hasUser) {
+      if (!state.userConfigured && !state.skillInstalled) {
         vscode.window.showInformationMessage('Debug MCP: nothing to uninstall — no Claude Code config or skill found.');
         return;
       }
 
-      const items: { label: string; description: string; picked: boolean; value: 'user' | 'workspace' | 'skill' }[] = [];
-      if (hasUser) {
+      const items: { label: string; description: string; picked: boolean; value: 'user' | 'skill' }[] = [];
+      if (state.userConfigured) {
         items.push({
-          label: '$(globe) User-scope MCP registration',
+          label: '$(globe) MCP registration',
           description: 'Run `claude mcp remove --scope user vscode-debug`',
           picked: true,
           value: 'user'
         });
       }
-      if (hasWorkspace) {
+      if (state.skillInstalled) {
         items.push({
-          label: '$(folder) Workspace .mcp.json entry',
-          description: 'Remove vscode-debug from this workspace\'s .mcp.json',
+          label: '$(book) Global skill (~/.claude/skills/debug-mcp/)',
+          description: 'Remove the debug-mcp usage skill from your Claude Code config',
           picked: true,
-          value: 'workspace'
+          value: 'skill'
         });
       }
-      items.push({
-        label: '$(book) Global skill (~/.claude/skills/debug-mcp/)',
-        description: 'Remove the debug-mcp usage skill from your Claude Code config',
-        picked: true,
-        value: 'skill'
-      });
 
       const picks = await vscode.window.showQuickPick(items, {
         title: 'Uninstall Claude Code Support',
@@ -424,7 +280,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const removed = await uninstallClaudeCodeSupport({
         removeUserMcp: picks.some((p) => p.value === 'user'),
-        removeWorkspaceMcp: picks.some((p) => p.value === 'workspace'),
         removeSkill: picks.some((p) => p.value === 'skill')
       });
       await vscode.window.showInformationMessage(
@@ -473,6 +328,19 @@ export async function activate(context: vscode.ExtensionContext) {
     await startServer();
   }
 
+  // Self-heal: the registered bridge path embeds this extension's install dir,
+  // which changes on every version bump. If Claude Code is already configured
+  // but points at a stale bridge.js, silently re-point it at the current one.
+  const bridgePath = path.join(context.extensionPath, 'out', 'bridge.js');
+  void isStdioBridgeStale(bridgePath)
+    .then(async (stale) => {
+      if (stale) {
+        await registerStdioBridge(bridgePath);
+        log('Re-pointed the Claude Code stdio bridge at the current extension build.');
+      }
+    })
+    .catch((err) => log(`Bridge self-heal check failed: ${err instanceof Error ? err.message : err}`));
+
   // Background: ask GitHub if there's a newer release.
   void checkForUpdate(context, { silent: true });
 
@@ -490,10 +358,9 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
-  // Best-effort cleanup. We don't await Claude Code config removal —
-  // that requires the user to actively confirm via the Uninstall
-  // command. Here we only remove the global skill so leaving uninstall
-  // residue is minimal.
+  // Best-effort cleanup. We don't remove Claude Code config — that requires
+  // the user to actively confirm via the Uninstall command. Here we only
+  // remove the global skill so leaving uninstall residue is minimal.
   await stopServer();
   await deactivateCleanup();
 }

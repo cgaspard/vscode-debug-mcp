@@ -2,7 +2,7 @@
   "name": "vscode-debug-mcp",
   "displayName": "VS Code Debug MCP",
   "description": "MCP server exposing VS Code debugging, terminals, debug console, launch configurations, and tasks to AI assistants.",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "publisher": "cgaspard",
   "license": "MIT",
   "repository": {
@@ -46,10 +46,6 @@
       {
         "command": "vscodeDebugMcp.showInfo",
         "title": "Debug MCP: Show Connection Info"
-      },
-      {
-        "command": "vscodeDebugMcp.copyUrl",
-        "title": "Debug MCP: Copy Server URL"
       },
       {
         "command": "vscodeDebugMcp.configureClaudeCode",
@@ -625,20 +621,10 @@
     "configuration": {
       "title": "VS Code Debug MCP",
       "properties": {
-        "vscodeDebugMcp.port": {
-          "type": "number",
-          "default": 6736,
-          "description": "Port for the MCP Streamable HTTP server."
-        },
-        "vscodeDebugMcp.host": {
-          "type": "string",
-          "default": "127.0.0.1",
-          "description": "Host interface to bind the MCP server to."
-        },
         "vscodeDebugMcp.autoStart": {
           "type": "boolean",
           "default": true,
-          "description": "Start the MCP server automatically when the extension activates."
+          "description": "Start the per-window MCP server automatically when the extension activates."
         },
         "vscodeDebugMcp.terminalBufferLines": {
           "type": "number",
@@ -659,11 +645,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "express": "^4.21.2",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.2.1",
