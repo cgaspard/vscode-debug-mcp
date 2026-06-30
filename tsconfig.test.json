@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "out-test",
+    "rootDir": "src",
+    "module": "commonjs",
+    "target": "ES2020",
+    "types": ["node", "mocha"]
+  },
+  "include": ["src/test/**/*.ts"]
+}

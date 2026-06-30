@@ -3,13 +3,17 @@
 .github/**
 .claude/**
 src/**
+out-test/**
 sample-workspace/**
 releasenotes/**
 scripts/**
 .gitignore
 .eslintrc.json
 .mcp.json
+.vscode-test.mjs
+.vscode-test/**
 **/tsconfig.json
+**/tsconfig.*.json
 **/*.map
 **/*.ts
 # We bundle with esbuild — out/extension.js is the only runtime artifact we

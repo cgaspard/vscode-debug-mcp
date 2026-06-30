@@ -1,0 +1,21 @@
+version: 0.4.0
+date: 2026-06-30
+highlights:
+  - Connect more than Claude Code — a new harness manager registers the debug server with Claude Code, opencode, and Codex, plus a portable project .mcp.json, each installable at user or project scope.
+  - The server now appears automatically in VS Code's built-in MCP server list, so the native agent discovers it with no hand-written config.
+  - Requires VS Code 1.101 or newer — the minimum engine was raised from 1.90 to enable the native MCP registration API.
+added:
+  - "Harness manager (Debug MCP: Manage AI Harnesses…, also on the status-bar menu): a webview with one card per AI tool showing detected/configured state and Install/Uninstall buttons for both user and project scope."
+  - Native VS Code MCP discovery via vscode.lm.registerMcpServerDefinitionProvider, so the vscode-debug server shows up in VS Code's own MCP UI and the built-in agent without an mcp.json.
+  - opencode support — writes a local MCP server entry to ~/.config/opencode/opencode.json (user) or ./opencode.json (project).
+  - Codex support — writes an [mcp_servers.vscode-debug] table to ~/.codex/config.toml (user) or ./.codex/config.toml (project). Project scope warns that Codex only loads project config for trusted directories.
+  - "Project-scope installs for every harness: Claude Code writes a shared .mcp.json at the repo root; opencode and Codex write their project config files; and a portable .mcp.json target works with any MCP client."
+  - A user/project conflict warning before adding a project entry when the same tool is already configured at user scope.
+changed:
+  - "First-run setup now offers a single prompt that opens the harness manager, and the “don't ask again” choice is tracked per tool. Reset with Debug MCP: Reset Install Prompts."
+  - Activation self-heal now re-points stale user-scope registrations for every configured harness, not just Claude Code.
+  - The status-bar menu's install entry was replaced by "Manage AI harnesses…"; the old Install/Uninstall Claude Code commands now open the manager (the configure command is kept as an alias).
+  - Sample workspace docs no longer reference the removed HTTP endpoint; the extension serves a per-window MCP server automatically.
+fixed: []
+removed:
+  - "The standalone Uninstall Claude Code Support… command — uninstall is now per-card in the manager."

@@ -2,7 +2,7 @@
   "name": "vscode-debug-mcp",
   "displayName": "VS Code Debug MCP",
   "description": "MCP server exposing VS Code debugging, terminals, debug console, launch configurations, and tasks to AI assistants.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "cgaspard",
   "license": "MIT",
   "repository": {
@@ -14,7 +14,7 @@
   },
   "homepage": "https://github.com/cgaspard/vscode-debug-mcp#readme",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.101.0"
   },
   "categories": [
     "Debuggers",
@@ -48,13 +48,18 @@
         "title": "Debug MCP: Show Connection Info"
       },
       {
+        "command": "vscodeDebugMcp.manageHarnesses",
+        "title": "Debug MCP: Manage AI Harnesses…",
+        "category": "Debug MCP"
+      },
+      {
         "command": "vscodeDebugMcp.configureClaudeCode",
-        "title": "Debug MCP: Install Claude Code Support…",
+        "title": "Debug MCP: Manage AI Harnesses… (alias)",
         "category": "Debug MCP"
       },
       {
         "command": "vscodeDebugMcp.resetInstallPrompt",
-        "title": "Debug MCP: Reset Install Prompt"
+        "title": "Debug MCP: Reset Install Prompts"
       },
       {
         "command": "vscodeDebugMcp.showMenu",
@@ -63,10 +68,12 @@
       {
         "command": "vscodeDebugMcp.checkForUpdates",
         "title": "Debug MCP: Check for Updates"
-      },
+      }
+    ],
+    "mcpServerDefinitionProviders": [
       {
-        "command": "vscodeDebugMcp.uninstallClaudeCode",
-        "title": "Debug MCP: Uninstall Claude Code Support…"
+        "id": "vscode-debug-mcp.provider",
+        "label": "VS Code Debug MCP"
       }
     ],
     "languageModelTools": [
@@ -640,7 +647,10 @@
     "build:production": "node scripts/build.js --production",
     "watch": "node scripts/build.js --watch",
     "typecheck": "tsc -p ./ --noEmit",
-    "package": "npm run typecheck && npm run build:production && vsce package",
+    "test:unit": "rm -rf out-test && tsc -p tsconfig.unit.json && node out-test/tomlEdit.test.js && node out-test/harnesses/installers.test.js",
+    "test:e2e": "tsc -p tsconfig.test.json && npm run compile && vscode-test",
+    "test": "npm run test:unit && npm run test:e2e",
+    "package": "npm run typecheck && npm run test:unit && npm run build:production && vsce package",
     "lint": "tsc -p ./ --noEmit"
   },
   "dependencies": {
@@ -648,8 +658,11 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.11.0",
-    "@types/vscode": "^1.90.0",
+    "@types/vscode": "^1.101.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.2.1",
     "esbuild": "^0.28.0",
     "typescript": "^5.4.5"

@@ -13,11 +13,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
       - run: npm ci
       - run: npx tsc -p . --noEmit
-      - run: npm run compile
+      - run: npm run test:unit
+      # E2E launches a real VS Code; Linux needs a virtual framebuffer.
+      - run: xvfb-run -a npm run test:e2e
       - run: npx vsce package --out vscode-debug-mcp-dev.vsix
       - uses: actions/upload-artifact@v4
         with:

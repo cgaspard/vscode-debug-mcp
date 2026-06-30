@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -24,6 +24,13 @@ jobs:
 
       - name: Typecheck
         run: npx tsc -p . --noEmit
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      # E2E launches a real VS Code; Linux needs a virtual framebuffer.
+      - name: E2E tests
+        run: xvfb-run -a npm run test:e2e
 
       - name: Compile
         run: npm run compile

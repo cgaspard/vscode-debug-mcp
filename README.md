@@ -49,42 +49,34 @@ npm run compile
 
 Open the folder in VS Code and press **F5** to launch an Extension Development Host. Or `npm run package` to produce a local `.vsix`.
 
-## Use with Copilot (agent mode)
+## Use with Copilot & the built-in VS Code agent
 
 Once installed, Copilot's agent mode sees the tools immediately — no configuration. The tools are namespaced `debugMcp_*` (e.g. `debugMcp_start_debugging`, `debugMcp_run_task`). Write-y tools (start/stop debug, run/stop task, set/clear breakpoints, run in terminal, evaluate) confirm with the user before invoking; read-only tools run silently.
 
-## Use with Claude Code
+The extension also registers itself with **VS Code's native MCP server list** (via `vscode.lm.registerMcpServerDefinitionProvider`), so the server shows up automatically in VS Code's built-in MCP UI — no hand-written `mcp.json`. (This requires VS Code **1.101+**, the extension's minimum.)
 
-When the extension activates and detects that Claude Code (`anthropic.claude-code`) is installed, it offers to set things up.
+## Connect other AI tools — the harness manager
 
-**One registration, every workspace.** The installer registers a single **stdio** server named `vscode-debug` at user scope (in `~/.claude.json`). It points Claude Code at a small bridge that resolves the *current* window's socket at spawn time, so the same entry works in every workspace you open — there is no per-project `.mcp.json` to manage and no scope to pick. The only choice the installer asks about is whether to also install the usage skill.
+For external CLIs (Claude Code, opencode, Codex) and portable project configs, open the manager:
 
-**The skill is installed globally** at `~/.claude/skills/debug-mcp/SKILL.md`. It's generic guidance (no project-specific content) and Claude Code only auto-loads it when the conversation context matches (debugging, breakpoints, runtime state, etc.) — so a global install doesn't pollute unrelated conversations. The skill teaches Claude to prefer `launch.json` / tasks over raw `Bash`, and how to sequence breakpoint/stack/scope drill-downs.
+> **Cmd/Ctrl+Shift+P → Debug MCP: Manage AI Harnesses…** — or click the **`$(debug-alt) Debug MCP`** status-bar indicator → **Manage AI harnesses…**
 
-**Self-healing across updates.** The bridge lives inside the extension's install directory, whose path changes on every version bump. On activation the extension checks whether your `vscode-debug` registration points at the current build and silently re-points it if not — so updates don't break the integration. Upgrading from an older HTTP-based version replaces the old entry in place under the same `vscode-debug` name, so the `mcp__vscode-debug__*` tool prefix (and any skills/allowlists referencing it) keep working.
+It shows a card per tool with **User** (applies to every workspace) and **Project** (written into the current repo) install/uninstall buttons:
 
-**When the prompt re-fires:**
+| Harness | User scope | Project scope |
+| --- | --- | --- |
+| **Claude Code** | `~/.claude.json` (stdio bridge, + optional usage skill) | shared `.mcp.json` at the repo root |
+| **opencode** | `~/.config/opencode/opencode.json` | `./opencode.json` |
+| **Codex** | `~/.codex/config.toml` | `./.codex/config.toml` (only loads for codex-trusted dirs) |
+| **Generic (`.mcp.json`)** | — | portable `./.mcp.json` any MCP client can read |
 
-- ✅ User-scope MCP is configured → no prompt, anywhere
-- ⚠️ Not configured → prompts on activation
-- ❌ You picked "Don't ask again" → never prompts until you run **Debug MCP: Reset Install Prompt**
+**One registration, every workspace.** Each user-scope entry points the tool at a small **stdio** bridge that resolves the *current* window's socket at spawn time, so a single entry works in every workspace you open. The server key is `vscode-debug`, so tools surface as `mcp__vscode-debug__*` (Claude/Codex) or `vscode-debug_*` (opencode).
 
-You can re-open the installer any time:
+**Claude Code's usage skill** installs globally at `~/.claude/skills/debug-mcp/SKILL.md` (toggle on the Claude card). It's generic guidance Claude only auto-loads when the conversation matches (debugging, breakpoints, runtime state), teaching it to prefer `launch.json` / tasks over raw `Bash` and how to sequence breakpoint/stack/scope drill-downs. opencode and Codex have no skill system, so this is Claude-only.
 
-> **Cmd/Ctrl+Shift+P → Debug MCP: Install Claude Code Support…**
+**Self-healing across updates.** The bridge lives inside the extension's install directory, whose path changes on every version bump. On activation the extension re-points any *user-scope* registration that's gone stale, so updates don't break the integration. Upgrading from an older HTTP-based version replaces the old entry in place under the same `vscode-debug` name.
 
-Or, click the **`$(debug-alt) Debug MCP`** indicator in the status bar for a menu with install, start/stop, check-for-updates, and other actions.
-
-**Uninstall:** **Debug MCP: Uninstall Claude Code Support…** opens a multi-select picker letting you remove the user-scope registration and/or the global skill. The extension also performs a best-effort skill cleanup on `deactivate()` (when you uninstall the extension itself).
-
-If you'd rather configure manually, register the bridge at user scope (one entry works everywhere):
-
-```bash
-claude mcp add-json --scope user vscode-debug \
-  '{"type":"stdio","command":"node","args":["<path-to-extension>/out/bridge.js"]}'
-```
-
-Replace `<path-to-extension>` with the extension's install directory (the **Install Claude Code Support…** command fills this in for you, using the exact Node that runs VS Code).
+**First-run & uninstall.** When a supported tool is detected but not yet configured, the extension offers once to open the manager (dismissible per tool; reset with **Debug MCP: Reset Install Prompts**). Uninstall lives on each card — remove either scope independently.
 
 ## The most common workflow: user-started debug sessions
 
