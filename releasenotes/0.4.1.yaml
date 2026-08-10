@@ -1,0 +1,9 @@
+version: 0.4.1
+date: 2026-08-10
+highlights:
+  - New purple ladybug icon — the extension icon now matches the purple theme shared by the rest of the publisher's extensions.
+added: []
+changed:
+  - Recolored the extension icon from orange to purple. Same ladybug, same dark background and circuit antennae — only the bug itself changed color.
+fixed: []
+removed: []
