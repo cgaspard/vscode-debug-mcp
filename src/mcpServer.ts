@@ -86,10 +86,10 @@ export function buildMcpServer(env: MCPServerEnv, _sessionWorkspace?: Map<string
   );
 
   // Launch / sessions
-  forwarded('list_launch_configurations', 'List debug configurations defined in launch.json across workspace folders.', {});
-  forwarded('start_debugging', 'Start a debug session by launch.json configuration name. Omit name to use the workspace default.', {
-    name: z.string().optional().describe('Configuration name from launch.json'),
-    workspaceFolder: z.string().optional().describe('Workspace folder name (optional)')
+  forwarded('list_launch_configurations', 'List debug configurations defined in the open .code-workspace file and in launch.json across workspace folders.', {});
+  forwarded('start_debugging', 'Start a debug session by configuration name from the open .code-workspace file or a workspace folder launch.json. If names collide, omit workspaceFolder to select the workspace profile or set it to select a folder profile.', {
+    name: z.string().optional().describe('Configuration name from the workspace or a workspace folder'),
+    workspaceFolder: z.string().optional().describe('Workspace folder name; when provided, selects that folder profile')
   });
   forwarded('stop_debugging', 'Stop the active debug session.', {});
   forwarded('continue_execution', 'Continue execution in the active debug session.', { threadId: z.number().int().optional() });

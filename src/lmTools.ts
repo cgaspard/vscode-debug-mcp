@@ -83,7 +83,7 @@ export function registerLmTools(context: vscode.ExtensionContext, capture: Captu
     defineTool<{}>({
       name: 'debugMcp_list_launch_configurations',
       handler: () => debugOps.listConfigurations(),
-      invocationMessage: () => 'Listing launch.json configurations'
+      invocationMessage: () => 'Listing launch configurations'
     })
   );
 
@@ -95,7 +95,7 @@ export function registerLmTools(context: vscode.ExtensionContext, capture: Captu
       confirm: ({ name }) => ({
         title: 'Start debug session',
         message: new vscode.MarkdownString(
-          `Start the debug session **${name ?? '(workspace default)'}** from \`launch.json\`?`
+          `Start the debug session **${name ?? '(workspace default)'}**?`
         )
       })
     })

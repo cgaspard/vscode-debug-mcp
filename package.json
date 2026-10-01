@@ -119,8 +119,8 @@
       {
         "name": "debugMcp_list_launch_configurations",
         "displayName": "List launch configurations",
-        "modelDescription": "List the debug configurations defined in launch.json across the open workspace folders. Use this BEFORE asking the user how to run something — they likely already configured it.",
-        "userDescription": "Read launch.json configurations",
+        "modelDescription": "List debug configurations from the open .code-workspace file and launch.json across workspace folders. Use this BEFORE asking the user how to run something — they likely already configured it.",
+        "userDescription": "Read launch configurations",
         "canBeReferencedInPrompt": true,
         "toolReferenceName": "debugConfigs",
         "tags": [
@@ -134,7 +134,7 @@
       {
         "name": "debugMcp_start_debugging",
         "displayName": "Start debugging",
-        "modelDescription": "Start a VS Code debug session by launch.json configuration name. Prefer this over running the program via the terminal — the user gets a real interactive debug session with breakpoints, variable inspection, and the debug console.",
+        "modelDescription": "Start a VS Code debug session by configuration name from the open .code-workspace file or a workspace folder's launch.json. Prefer this over running the program via the terminal — the user gets a real interactive debug session with breakpoints, variable inspection, and the debug console.",
         "userDescription": "Start a debug session",
         "tags": [
           "debug-mcp"
@@ -144,11 +144,11 @@
           "properties": {
             "name": {
               "type": "string",
-              "description": "Configuration name from launch.json. Omit to use the default."
+              "description": "Configuration name from the workspace or a workspace folder. Omit to use the default."
             },
             "workspaceFolder": {
               "type": "string",
-              "description": "Workspace folder name (optional)."
+              "description": "Workspace folder name; set this to select a folder profile when names collide."
             }
           }
         }
