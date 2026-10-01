@@ -81,6 +81,18 @@ async function pickThreadId(session: vscode.DebugSession, threadId?: number): Pr
 export const debugOps = {
   listConfigurations(): { name: string; type: string; request: string; workspace: string }[] {
     const out: { name: string; type: string; request: string; workspace: string }[] = [];
+    const workspaceFile = vscode.workspace.workspaceFile;
+    if (workspaceFile?.fsPath.endsWith('.code-workspace')) {
+      const configurations = vscode.workspace.getConfiguration('launch').get<any[]>('configurations') ?? [];
+      for (const c of configurations) {
+        out.push({
+          name: c.name,
+          type: c.type,
+          request: c.request,
+          workspace: vscode.workspace.name ?? 'Workspace'
+        });
+      }
+    }
     const folders = vscode.workspace.workspaceFolders ?? [];
     for (const folder of folders) {
       const cfg = vscode.workspace.getConfiguration('launch', folder.uri);
@@ -99,6 +111,17 @@ export const debugOps = {
 
   async start(name?: string, workspaceFolder?: string): Promise<{ started: boolean; sessionName?: string }> {
     const folders = vscode.workspace.workspaceFolders ?? [];
+    const workspaceFile = vscode.workspace.workspaceFile;
+    const workspaceConfigurations = workspaceFile?.fsPath.endsWith('.code-workspace')
+      ? vscode.workspace.getConfiguration('launch').get<any[]>('configurations') ?? []
+      : [];
+    const workspaceConfiguration = !workspaceFolder && name
+      ? workspaceConfigurations.find((c) => c.name === name)
+      : undefined;
+    if (workspaceConfiguration) {
+      const started = await vscode.debug.startDebugging(undefined, workspaceConfiguration);
+      return { started, sessionName: vscode.debug.activeDebugSession?.name };
+    }
     let folder = folders[0];
     if (workspaceFolder) {
       const match = folders.find((f) => f.name === workspaceFolder);

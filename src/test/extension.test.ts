@@ -77,7 +77,7 @@ suite('Debug MCP — server lifecycle', () => {
 });
 
 suite('Debug MCP — tools dispatch', () => {
-  test('list_launch_configurations sees the sample launch.json', async function () {
+  test('list_launch_configurations includes workspace and folder profiles', async function () {
     this.timeout(20000);
     await getExt().activate();
 
@@ -98,9 +98,45 @@ suite('Debug MCP — tools dispatch', () => {
     const text = result.content
       .map((part: any) => (typeof part.value === 'string' ? part.value : ''))
       .join('');
-    assert.ok(text.length > 0, 'tool returned content');
-    // sample-workspace/.vscode/launch.json defines "Launch Sample App".
-    assert.ok(/Launch Sample App/.test(text), `expected sample config in: ${text.slice(0, 300)}`);
+    const configurations = JSON.parse(text) as { name: string; workspace: string }[];
+    assert.ok(
+      configurations.some((c) => c.name === 'Launch Sample App' && c.workspace === 'sample-workspace'),
+      `expected folder config in: ${text.slice(0, 300)}`
+    );
+    assert.ok(
+      configurations.some((c) => c.name === 'Workspace Sample App' && c.workspace === vscode.workspace.name),
+      `expected workspace config in: ${text.slice(0, 300)}`
+    );
+  });
+
+  test('start_debugging selects workspace profiles by default and folder profiles by workspaceFolder', async function () {
+    this.timeout(30000);
+    await getExt().activate();
+
+    const startTool = async (input: { name: string; workspaceFolder?: string }) => {
+      const result = await vscode.lm.invokeTool('debugMcp_start_debugging', {
+        input,
+        toolInvocationToken: undefined
+      });
+      return JSON.parse(result.content.map((part: any) => part.value ?? '').join('')) as { started: boolean };
+    };
+
+    try {
+      const workspaceStart = await startTool({ name: 'Workspace Sample App' });
+      assert.strictEqual(workspaceStart.started, true, JSON.stringify(workspaceStart));
+      await vscode.debug.stopDebugging();
+
+      const collisionStart = await startTool({ name: 'Launch Sample App' });
+      assert.strictEqual(collisionStart.started, true, JSON.stringify(collisionStart));
+      assert.strictEqual(vscode.debug.activeDebugSession?.configuration.stopOnEntry, true);
+      await vscode.debug.stopDebugging();
+
+      const folderStart = await startTool({ name: 'Launch Sample App', workspaceFolder: 'sample-workspace' });
+      assert.strictEqual(folderStart.started, true);
+      assert.notStrictEqual(vscode.debug.activeDebugSession?.configuration.stopOnEntry, true);
+    } finally {
+      await vscode.debug.stopDebugging();
+    }
   });
 });
 

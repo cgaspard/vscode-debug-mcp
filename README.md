@@ -6,7 +6,7 @@ Capabilities:
 
 - Read terminal output (via VS Code shell integration)
 - Read the debug console
-- Start / stop sessions defined in `launch.json` by name
+- Start / stop sessions defined in the open `.code-workspace` file or a folder's `.vscode/launch.json` by name
 - Run, list, and stop VS Code tasks
 - Set, list, toggle, and clear breakpoints
 - Inspect threads, stack frames, scopes, variables; evaluate expressions
